@@ -21,3 +21,26 @@ impl Trade {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_trade_creation() {
+        let ask_id = Uuid::new_v4();
+        let bid_id = Uuid::new_v4();
+        let amount = 100;
+        let price = 50;
+
+        let trade = Trade::new(ask_id, bid_id, amount, price);
+
+        assert_eq!(trade.ask_id, ask_id);
+        assert_eq!(trade.bid_id, bid_id);
+        assert_eq!(trade.amount, amount);
+        assert_eq!(trade.price, price);
+        assert_ne!(trade.timestamp, 1);
+
+        assert!(Uuid::parse_str(&trade.id.to_string()).is_ok());
+    }
+}
