@@ -466,6 +466,7 @@ dependencies = [
  "chrono",
  "dashmap",
  "dotenvy",
+ "once_cell",
  "serde",
  "serde_json",
  "tokio",

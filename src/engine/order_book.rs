@@ -1,176 +1,126 @@
-use std::collections::{BTreeMap, VecDeque};
-use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap, VecDeque};
+use std::cmp::{Ordering, Reverse};
 
 use super::order::Order;
 use super::trade::Trade;
+use crate::engine::order::{Price, Quantity, Side};
+
+pub type OrderQueue = BinaryHeap<TimePriority>;
+pub type OrderMap = HashMap<Price, OrderQueue>;
+pub type BidQueue = BinaryHeap<Price>;
+pub type AskQueue = BinaryHeap<Reverse<Price>>;
+
+// TimePriority will work as a wrapper to allow sorting
+// orders by timestamp without alter Order itself.
+// Older timestamp will be first.
+#[derive(Eq, PartialEq)]
+struct TimePriority(Order);
+impl Ord for TimePriority {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other.0.timestamp.cmp(&self.0.timestamp)
+    }
+}
+impl PartialOrd for TimePriority {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 pub struct OrderBook {
-    asks: BTreeMap<u32, VecDeque<Order>>,
-    bids: BTreeMap<u32, VecDeque<Order>>,
+    pub bids: OrderMap,
+    pub asks: OrderMap,
+    pub bids_queue: BidQueue,
+    pub asks_queue: AskQueue,
+    pub last_price: Price
 }
 impl OrderBook {
-    pub fn new() -> OrderBook {
-        OrderBook {
-            asks: BTreeMap::new(),
-            bids: BTreeMap::new()
+    pub fn new() -> Self {
+        Self {
+            bids: OrderMap::new(),
+            asks: OrderMap::new(),
+            bids_queue: BidQueue::new(),
+            asks_queue: AskQueue::new(),
+            last_price: 0,
         }
     }
 
-    fn push_order(tree: &mut BTreeMap<u32, VecDeque<Order>>, order: Order) {
-        tree.entry(order.price)
-            .or_insert(VecDeque::new())
-            .push_back(order);
+    fn get_best_price(&self, order: &Order) -> Option<Price> {
+        match order.side {
+            Side::Bid => self.asks_queue.peek().map(|r| r.0),
+            Side::Ask => self.bids_queue.peek().copied(),
+        }
     }
 
-    pub fn push_ask(&mut self, order: Order) {
-        OrderBook::push_order(&mut self.asks, order);
+    fn push(&mut self, order: Order) {
+        let map = match order.side {
+            Side::Bid => {
+                self.bids_queue.push(order.price);
+                &mut self.bids
+            }
+            Side::Ask => {
+                self.asks_queue.push(Reverse(order.price));
+                &mut self.asks
+            }
+        };
+
+        map.entry(order.price)
+            .or_default()
+            .push(TimePriority(order.clone()));
     }
 
-    pub fn push_bid(&mut self, order: Order) {
-        OrderBook::push_order(&mut self.bids, order);
-    }
-
-    pub fn bid(&mut self, mut bid: Order) -> VecDeque<Trade> {
-        let mut trades: VecDeque<Trade> = VecDeque::new();
-
-        while !bid.is_complete() {
-            let lowest_asked_price = match self.asks.keys().next() {
-                Some(&price) => price,
+    pub fn execute(&mut self, mut order: Order) {
+        while !order.is_complete() {
+            let best_price = match self.get_best_price(&order) {
+                Some(price) => price,
                 None => {
-                    // There is not any ask yet
-                    self.push_bid(bid);
+                    self.push(order);
+                    break; // TODO: Return message 
+                } 
+            };
+
+            if best_price > order.price {
+                self.push(order);
+                break; // TODO: Return message
+            }
+
+            let map = match order.side {
+                Side::Bid => &mut self.asks,
+                Side::Ask => &mut self.bids,
+            };
+            let candidates = match map.get_mut(&best_price) {
+                Some(queue) => queue,
+                None => {
+                    self.push(order);
                     break;
                 }
             };
 
-            // There is not any matching ask yet
-            if lowest_asked_price > bid.price {
-                self.push_bid(bid);
-                break;
-            }
+            while !order.is_complete() && !candidates.is_empty() {
+                if let Some(mut item) = candidates.pop() {
+                    let candidate = &mut item.0;
+                    let quantity = std::cmp::min(
+                        order.get_pending(),
+                        candidate.get_pending()
+                    );      
 
-            let orders_at_lowest_price = self.asks.get_mut(&lowest_asked_price).unwrap();
+                    candidate.execute(quantity);
+                    order.execute(quantity);
 
-            while !bid.is_complete() && !orders_at_lowest_price.is_empty() {
-                // Pop order from queue
-                let mut ask_order = orders_at_lowest_price.pop_front().unwrap();
-                let amount = match bid.get_pending_amount().cmp(&ask_order.get_pending_amount()) {
-                    Ordering::Less | Ordering::Equal => bid.get_pending_amount(),
-                    Ordering::Greater => ask_order.get_pending_amount(),
-                };
-                let price = ask_order.price;
+                    if !candidate.is_complete() {
+                        candidates.push(TimePriority(candidate.clone()));
+                    }
 
-                bid.execute_amount(amount);
-                ask_order.execute_amount(amount);
-
-                trades.push_back(Trade::new(ask_order.id, bid.id, amount, price));
-
-                if !ask_order.is_complete() {
-                    // Push order back to the queue
-                    orders_at_lowest_price.push_front(ask_order);
-                }
-            }
-            
-            // If orders at this price has been consumed totally,
-            // remove the price vector from the asks tree
-            if orders_at_lowest_price.len() == 0 {
-                self.asks.remove(&lowest_asked_price);
-            }
-        }
-
-        trades
-    }
-
-    pub fn ask(&mut self, mut ask: Order) -> VecDeque<Trade> {
-        let mut trades: VecDeque<Trade> = VecDeque::new();
-
-        while !ask.is_complete() {
-            let highest_offered_price = match self.bids.keys().last() {
-                Some(&price) => price,
-                None => {
-                    // There is not any bid yet
-                    self.push_ask(ask);
+                    self.last_price = best_price;
+                    // Emit a Trade::new(order.id, candidate.id, quantity, best_price)
+                } else {
                     break;
                 }
-            };
-
-            // There is not any matching bid yet
-            if highest_offered_price > ask.price {
-                self.push_bid(ask);
-                break;
             }
 
-            let orders_at_highest_price = self.asks.get_mut(&highest_offered_price).unwrap();
-
-            while !ask.is_complete() && !orders_at_highest_price.is_empty() {
-                // Pop order from queue
-                let mut bid_order = orders_at_highest_price.pop_front().unwrap();
-                let amount = match ask.get_pending_amount().cmp(&bid_order.get_pending_amount()) {
-                    Ordering::Less | Ordering::Equal => ask.get_pending_amount(),
-                    Ordering::Greater => bid_order.get_pending_amount(),
-                };
-                let price = bid_order.price;
-
-                ask.execute_amount(amount);
-                bid_order.execute_amount(amount);
-
-                trades.push_back(Trade::new(ask.id, bid_order.id, amount, price));
-
-                if !bid_order.is_complete() {
-                    // Push order back to the queue
-                    orders_at_highest_price.push_front(bid_order);
-                }
-            }
-            
-            // If orders at this price has been consumed totally,
-            // remove the price vector from the asks tree
-            if orders_at_highest_price.len() == 0 {
-                self.asks.remove(&highest_offered_price);
+            if candidates.is_empty() {
+                // Remove from prices queue
+                map.remove(&best_price);
             }
         }
-
-        trades
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::engine::order::OrderType;
-    use super::*;
-
-    #[test]
-    fn test_orderbook_creation() {
-        let asks = BTreeMap::new();
-        let bids = BTreeMap::new();
-
-        let order_book: OrderBook = OrderBook::new();
-
-        assert_eq!(order_book.asks, asks);
-        assert_eq!(order_book.bids, bids);
-    }
-
-    #[test]
-    fn test_push_orders() {
-        let price = 100;
-        let mut order_book: OrderBook = OrderBook::new();
-        let order = Order::new(
-            "Alice".to_string(),
-            100,
-            price,
-            OrderType::Limit
-        );
-        let mut expected_collection = BTreeMap::new();
-        let mut queue = VecDeque::new();
-        let ask_order = order.clone();
-        let bid_order = order.clone();
-
-        queue.push_back(order);
-        expected_collection.insert(price, queue);
-
-        order_book.push_ask(ask_order);
-        assert_eq!(order_book.asks, expected_collection);
-
-        order_book.push_bid(bid_order);
-        assert_eq!(order_book.bids, expected_collection);
     }
 }

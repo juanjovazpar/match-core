@@ -1,5 +1,6 @@
-pub mod order_book;
-pub mod order;
-pub mod trade;
+mod order_book;
+mod order;
+mod trade;
+mod engine;
 
-// TODO: Split the engine into threads to improve performance
+pub use engine::start;

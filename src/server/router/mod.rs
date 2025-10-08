@@ -1,5 +1,6 @@
 mod router;
-mod healthz;
 mod paths;
+mod healthz;
+mod order;
 
 pub use router::create;

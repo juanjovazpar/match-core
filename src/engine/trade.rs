@@ -1,22 +1,24 @@
 use chrono::Utc;
 use uuid::Uuid;
 
+use crate::engine::order::{Price, Quantity, Timestamp};
+
 pub struct Trade {
     pub id: Uuid,
-    pub ask_id: Uuid,
-    pub bid_id: Uuid,
-    pub amount: u32,
-    pub price: u32,
-    pub timestamp: i64,
+    pub ask: Uuid,
+    pub bid: Uuid,
+    pub quantity: Quantity,
+    pub price: Price,
+    pub timestamp: Timestamp,
 }
 impl Trade {
-    pub fn new(ask_id: Uuid, bid_id: Uuid, amount: u32, price: u32) -> Trade {
-        Trade {
-            id: Uuid::new_v4(),
-            ask_id,
-            bid_id,
-            amount,
+    pub fn new(ask: Uuid, bid: Uuid, quantity: Quantity, price: Price) -> Self {
+        Self {
+            ask,
+            bid,
+            quantity,
             price,
+            id: Uuid::new_v4(),
             timestamp: Utc::now().timestamp_millis()
         }
     }
@@ -28,16 +30,16 @@ mod tests {
 
     #[test]
     fn test_trade_creation() {
-        let ask_id = Uuid::new_v4();
-        let bid_id = Uuid::new_v4();
-        let amount = 100;
-        let price = 50;
+        let ask = Uuid::new_v4();
+        let bid = Uuid::new_v4();
+        let amount: Quantity = 100;
+        let price: Price = 50;
 
-        let trade = Trade::new(ask_id, bid_id, amount, price);
+        let trade = Trade::new(ask, bid, amount, price);
 
-        assert_eq!(trade.ask_id, ask_id);
-        assert_eq!(trade.bid_id, bid_id);
-        assert_eq!(trade.amount, amount);
+        assert_eq!(trade.ask, ask);
+        assert_eq!(trade.bid, bid);
+        assert_eq!(trade.quantity, amount);
         assert_eq!(trade.price, price);
         assert_ne!(trade.timestamp, 1);
 
