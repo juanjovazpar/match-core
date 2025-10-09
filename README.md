@@ -35,10 +35,10 @@ The mpsc channels will act as FIFO queues. This way, when the matching engine is
 The matching engine uses a **hybrid structure** that combines hash maps and binary heaps to efficiently manage and match orders.
 
 ````
-pub type OrderQueue = BinaryHeap<Order>;
+pub type OrderQueue = VecDequeue<Order>;
 pub type OrderMap = HashMap<Price, OrderQueue>;
-pub type BidQueue = BinaryHeap<Price>;
-pub type AskQueue = BinaryHeap<Reverse<Price>>;
+pub type BidQueue = BTreeSet<Price>;
+pub type AskQueue = BTreeSet<Reverse<Price>>;
 
 pub struct OrderBook {
     pub bids: OrderMap,
@@ -49,18 +49,20 @@ pub struct OrderBook {
 }
 ````
 
-- `OrderQueue` stores Order in a BinaryHeap to ensure the order by timestamp.
+- `OrderQueue`:
+Stores Order in a `VecDequeue` to ensure FIFO access.
 - `OrderMap` (`HashMap<Price, OrderQueue>`)
-Each price level maps to a queue of orders (`OrderQueue`), stored as a max-heap (`BinaryHeap`) sorted by time priority (earlier orders have higher priority).
-    - `bids` contains buy orders (max-price priority).
-    - `asks` contains sell orders (min-price priority).
-
-- `BidQueue` and `AskQueue`
+Each price level maps to a queue of orders (`OrderQueue`), stored as a stack (`VecDequeue<Order>`) sorted in a FIFO model (older orders have higher priority).
+    - `bids`:
+    contains buy orders grouped by price.
+    - `asks`:
+    contains sell orders grouped by price.
+- `BidQueue` and `AskQueue`:
 These heaps maintain the set of active price levels, enabling quick access to the best bid (highest price) and best ask (lowest price) in O(1).
 - `BidQueue`:
-`BinaryHeap<Price>` — max-heap for bids sorted by timestamp.
+Prices for placed bids are uniquely stored in a descending order in a `BTreeSet<Price>` structure.
 - `AskQueue`:
-`BinaryHeap<Reverse<Price>>` — min-heap for asks sorted by timestamp.
+Prices for placed asks are uniquely stored in an ascending order in a `BTreeSet<Reverse<Price>>` structure.
 - `last_price`:
 Stores the last traded price for market reference.
 
@@ -72,20 +74,27 @@ BinaryHeap ensures O(log n) insertion/removal while maintaining order priority (
 This design balances speed, simplicity, and memory efficiency, and scales well under high-frequency trading workloads.
 
 ### Matching flow
+
+The following diagram shows the flow to match an entry order:
+
 ![Matching Overview](./assets/images/matching-overview.png)
 
 #### Complexity
-| Operation                         | Description                                        | Complexity |
-| --------------------------------- | -------------------------------------------------- | ---------- |
-| **Add order**                     | Insert into price-level heap + update price heap   | O(log n)   |
-| **Find best bid/ask**             | Peek top of `BidQueue` or `AskQueue`               | O(1)       |
-| **Find specific price level**     | HashMap lookup                                     | O(1) avg   |
-| **Match order (partial/full)**    | Pop from heap(s), update price heaps if needed     | O(log n)   |
+
+| Operation | Description | Complexity |
+| --------- | ----------- | ---------- |
+| **Add order** | Insert order into price-level map + update prices queue | O(log n) |
+| **Find best bid/ask** | `.first()` of `BidQueue` or `AskQueue` | O(1) |
+| **Find specific price level** | HashMap lookup `bids` or `asks` | O(1) |
+| **Remove best bid/ask** | `pop_first()` of `BidQueue` or `AskQueue` | O(log n) |
+| **Remove price level** | Remove queue from map `bids` or `asks` | O(1) |
+| **Match order (partial/full)** | Pop from tree(s), update orders in maps and prices tree if needed | O(log n) |
 
 
 ## Development 
 
 ### Dependencies
+
 - **axum:** Web framework for building HTTP servers and WebSocket endpoints; handles routing, extractors, and middleware.
 - **tokio:** Asynchronous runtime for handling multiple concurrent tasks efficiently, including WebSocket connections.
 - **serde:** Serialization/deserialization library; allows converting Rust structs to JSON and back.
