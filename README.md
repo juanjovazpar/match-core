@@ -27,6 +27,7 @@ To maximize parallelism and minimize thread blocking and bottlenecks, the engine
 - **Server Layer:** server for client connections. It does include a minimal API rest to manage orders and a socket channel to be updated with the order book changes.
 - **Matching Engine Core:** the heart of the system, where the order book exists and the trades are created through matching orders.
 - **Event System:** two **mspc** channels connect the execution threads and keep the paralellism efficient. The <span style="color:#f57751;">red channel</span> allows the connection to the engine while the <span style="color:#5951f5;">blue channel</span> helps the enginee to broadcast the changes.
+The mpsc channels will act as FIFO queues. This way, when the matching engine is busy and cannot process an incoming order, that order will wait in the queue until it is executed.
 - **Persistency Layer:** stores the orders and trades. It also in charge to create snapshots of the orderbook for recovery.
 
 ### Data Structure
@@ -70,7 +71,10 @@ BinaryHeap ensures O(log n) insertion/removal while maintaining order priority (
 
 This design balances speed, simplicity, and memory efficiency, and scales well under high-frequency trading workloads.
 
-#### Complexity and cost
+### Matching flow
+![Matching Overview](./assets/images/matching-overview.png)
+
+#### Complexity
 | Operation                         | Description                                        | Complexity |
 | --------------------------------- | -------------------------------------------------- | ---------- |
 | **Add order**                     | Insert into price-level heap + update price heap   | O(log n)   |
