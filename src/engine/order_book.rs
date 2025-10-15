@@ -8,8 +8,8 @@ use super::trade::Trade;
 
 pub type OrderQueue = LinkedHashmap<Order>;
 pub type OrderMap = HashMap<Price, OrderQueue>;
-pub type BidQueue = BTreeSet<Reverse<Price>>; // Ordered mallest to greatest
-pub type AskQueue = BTreeSet<Price>; // Ordered greatest to mallest
+pub type BidQueue = BTreeSet<Reverse<Price>>; // Ordered greatest to smallest
+pub type AskQueue = BTreeSet<Price>; // Ordered smallest to greatest
 
 /* 
     `OrderBook` maintains the current state of a trading book with bids and asks.
@@ -100,7 +100,8 @@ impl OrderBook {
                     order.execute(quantity);
 
                     if !candidate.is_complete() {
-                        queue.push_first(candidate); // push back if partially filled
+                        // push back if partially filled
+                        queue.push_first(candidate);
                     }
 
                     let trade = Trade::new(order.id, candidate_id, quantity, best_price);
@@ -120,6 +121,35 @@ impl OrderBook {
         }
         
         trades
+    }
+
+    pub fn cancel(&mut self, order: Order) {
+        match order.side {
+            Side::Bid => {
+                if let Some(queue) = self.bids.get_mut(&order.price) {
+                    queue.remove(&order.id);
+
+                    if queue.is_empty() {
+                        self.bids.remove(&order.price);
+                        self.bids_queue.remove(&Reverse(order.price));
+                    }
+                } else {
+                    self.bids_queue.remove(&Reverse(order.price));
+                }
+            }
+            Side::Ask => {
+                if let Some(queue) = self.asks.get_mut(&order.price) {
+                    queue.remove(&order.id);
+
+                    if queue.is_empty() {
+                        self.asks.remove(&order.price);
+                        self.asks_queue.remove(&order.price);
+                    }
+                } else {
+                    self.asks_queue.remove(&order.price);
+                }
+            }
+        }
     }
 }
 
@@ -190,5 +220,23 @@ mod tests {
         let trades = book.execute(bid_order_1);
 
         assert_eq!(trades.len(), 2);
+    }
+
+    #[test]
+    fn cancel_candidate() {
+        let mut book = OrderBook::new();
+        let ask_order_1 = Order::new(Uuid::new_v4(), 100, 10, Side::Ask, Mode::Market);
+        let ask_order_2 = Order::new(Uuid::new_v4(), 100, 9, Side::Ask, Mode::Market);
+        let bid_order_1 = Order::new(Uuid::new_v4(), 200, 12, Side::Bid, Mode::Market);
+        let ask_order_clone = ask_order_2.clone();
+
+        book.execute(ask_order_1);
+        book.execute(ask_order_2);
+
+        book.cancel(ask_order_clone);
+        
+        let trades = book.execute(bid_order_1);
+
+        assert_eq!(trades.len(), 1);
     }
 }
