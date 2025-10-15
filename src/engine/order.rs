@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use chrono::Utc;
 use uuid::Uuid;
+use super::linked_hashmap::HasId;
 
 pub type Price = u32;
 pub type OrderId = u64;
@@ -71,6 +72,13 @@ impl Order {
                 0
             },
         }
+    }
+}
+impl HasId for Order {
+    type Id = Uuid;
+
+    fn id(&self) -> Self::Id {
+        self.id
     }
 }
 

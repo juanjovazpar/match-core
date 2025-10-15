@@ -3,6 +3,16 @@ use uuid::Uuid;
 
 use crate::engine::order::{Price, Quantity, Timestamp};
 
+/* 
+    Represents a completed trade between a bid and an ask order.
+    Fields:
+    - `id`: Unique identifier of the trade.
+    - `ask`: UUID of the ask order involved.
+    - `bid`: UUID of the bid order involved.
+    - `quantity`: Quantity of the asset traded.
+    - `price`: Execution price of the trade.
+    - `timestamp`: Time when the trade was executed (milliseconds since epoch).
+*/
 pub struct Trade {
     pub id: Uuid,
     pub ask: Uuid,

@@ -1,11 +1,11 @@
 use std::env;
 use dotenvy::dotenv;
 use uuid::Uuid;
-use tokio::sync::mpsc::{self, Sender};
+use tokio::sync::mpsc::{self, Sender, Receiver};
 
 use crate::{engine::{order::{Order, Mode, Side}, order_book::OrderBook}, Message};
 
-pub fn start() -> Sender<Message> {
+pub async fn start() -> (Sender<Message>, Receiver<Message>) {
     dotenv().ok();
 
     let buffer = env::var("CHANNEL_BUFFER")
@@ -14,14 +14,20 @@ pub fn start() -> Sender<Message> {
         .expect("CHANNEL_BUFFER must be a number");
     
     let mut order_book = OrderBook::new();
-    let (tx, mut rx) = mpsc::channel::<Message>(buffer);
+    // Channel for the engine to receive message
+    let (out_sender, mut out_receiver) = mpsc::channel::<Message>(buffer);
+
+    // Channel for the engine to send message
+    let (in_sender, in_receiver) = mpsc::channel::<Message>(buffer);
 
     tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
+        while let Some(msg) = out_receiver.recv().await {
+            let _ = in_sender.send(Message::new(String::from("hello engine"))).await;
             println!("message incoming: {}", msg.content);
             order_book.execute(Order::new(Uuid::new_v4(), 10, 100, Side::Ask, Mode::Limit));
         }
     });
 
-    tx
+
+    (out_sender, in_receiver)
 }

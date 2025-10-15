@@ -1,7 +1,7 @@
-use std::env;
+use std::{env};
 use dotenvy::dotenv;
 
-mod server;
+// mod server;
 mod engine;
 
 pub struct Message {
@@ -15,7 +15,7 @@ impl Message {
 
 #[tokio::main]
 async fn main() {
-    dotenv().ok();
+    /* dotenv().ok();
 
     let host = env::var("HOST")
         .unwrap_or_else(|_| "127.0.0.1"
@@ -24,7 +24,14 @@ async fn main() {
         .unwrap_or_else(|_| "3000"
         .to_string());
 
-    let tx = engine::start();
+    let (tx, mut rx) = engine::start().await;
     
     server::start(host, port, tx).await;
+
+    // Receiving messages from engine
+    tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            println!("Message incoming from engine: {}", msg.content);
+        }
+    }); */
 }

@@ -35,10 +35,10 @@ The mpsc channels will act as FIFO queues. This way, when the matching engine is
 The matching engine uses a **hybrid structure** that combines hash maps and binary heaps to efficiently manage and match orders.
 
 ````
-pub type OrderQueue = VecDequeue<Order>;
+pub type OrderQueue = LinkedHashmap<Order>;
 pub type OrderMap = HashMap<Price, OrderQueue>;
-pub type BidQueue = BTreeSet<Price>;
-pub type AskQueue = BTreeSet<Reverse<Price>>;
+pub type BidQueue = BTreeSet<Price>; // smallest first
+pub type AskQueue = BTreeSet<Reverse<Price>>; // greatest first
 
 pub struct OrderBook {
     pub bids: OrderMap,
@@ -50,7 +50,7 @@ pub struct OrderBook {
 ````
 
 - `OrderQueue`:
-Stores Order in a `VecDequeue` to ensure FIFO access.
+Stores Order in a `LinkedHashmap` to ensure FIFO access from the linked list.
 - `OrderMap` (`HashMap<Price, OrderQueue>`)
 Each price level maps to a queue of orders (`OrderQueue`), stored as a stack (`VecDequeue<Order>`) sorted in a FIFO model (older orders have higher priority).
     - `bids`:

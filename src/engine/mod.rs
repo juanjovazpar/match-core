@@ -1,6 +1,7 @@
 mod order_book;
-mod order;
 mod trade;
 mod engine;
+mod linked_hashmap;
 
 pub use engine::start;
+pub mod order;
