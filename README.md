@@ -65,7 +65,7 @@ Prices for placed asks are uniquely stored in an ascending order in a `BTreeSet<
 
 
 This structure optimizes for fast price-level access and priority matching:
-Using HashMaps allows constant-time lookup of existing price levels and ensures insertion/removal while maintaining order priority. Keeping separate global BTreeSet for prices (BidQueue, AskQueue) avoids scanning all price levels to find the best price — crucial for real-time matching performance.
+Using `HashMaps` allows constant-time lookup of existing price levels and ensures insertion/removal while maintaining order priority. Keeping separate global `BTreeSet` for prices (`BidQueue`, `AskQueue`) avoids scanning all price levels to find the best price — crucial for real-time matching performance.
 
 This design balances speed, simplicity, and memory efficiency, and scales well under high-frequency trading workloads.
 
@@ -101,6 +101,11 @@ pub struct LinkedHashmap<T: HasId> {
     tail: Option<T::Id>,
     items: HashMap<T::Id, Node<T>>,
 }
+impl<T> LinkedHashmap<T>
+where
+    T: HasId,
+    T::Id: Eq + Hash + Clone,
+{
     pub fn new() -> Self {}
 
     pub fn push(&mut self, value: T) {}
@@ -126,6 +131,7 @@ pub struct LinkedHashmap<T: HasId> {
     pub fn contains(&self, id: &T::Id) -> bool {}
 
     pub fn clear(&mut self) {}
+}
 ````
 
 ##### Operation costs table:
