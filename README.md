@@ -1,8 +1,8 @@
 # MATCH CORE
 
-This project implements a **centralized off-chain matching engine**, the fundamental component at the core of any trading platform or electronic exchange. A matching engine is responsible for receiving buy and sell orders from multiple clients, storing them in an order book, and continuously matching compatible orders to generate trades. In practice, this is the same mechanism that powers real-world exchanges such as Binance or Coinbase: every time a trader places a limit or market order, the matching engine determines if there is a counterpart order available and executes the transaction.
+This project implements a **centralized matching engine**, the fundamental component at the core of any trading platform or electronic exchange. A matching engine is responsible for receiving buy and sell orders from multiple clients, storing them in an order book, and continuously matching compatible orders to generate trades. In practice, this is the same mechanism that powers real-world exchanges such as Binance or Coinbase: every time a trader places a limit or market order, the matching engine determines if there is a counterpart order available and executes the transaction. Queuing those that aren’t matched at the moment they are placed.
 
-Our implementation is written in **Rust**, leveraging its safety guarantees and concurrency model to deliver **low latency, high throughput, and fault-tolerant order processing**. It is designed as a self-contained service that can run locally on your machine, providing developers and students with a realistic environment to study and experiment with how exchanges operate under the hood.
+Our implementation is written in **Rust**, leveraging its safety guarantees and concurrency model to deliver **low latency, high throughput, and fault-tolerant order processing**. It is designed as a self-contained service that can run as a microservice in any system.
 
 ## Key Features
 
@@ -13,12 +13,11 @@ Our implementation is written in **Rust**, leveraging its safety guarantees and 
 - **Resilience:** recovery after restarts or crashes.
 - **Real-Time-Updates:** clients receive live notifications of book updates and trades via WebSocket.
 - **Concurrency:** built with Rust’s async runtime to handle multiple clients safely and efficiently.
-- **Metrics:** track trades, active orders, and basic performance stats.
 
 ## Architecture Overview
 
-This matching engine is built with a strong focus on efficiency, parallelism, and safety. To achieve these goals, each engine instance is designed to handle a `single trading pair independently`. This isolation minimizes contention between markets and allows the system to scale horizontally.
-If bidirectional or cross-pair trading is required (for example, `USD/EUR` and `EUR/USD`), separate instances can be deployed — for instance, as two distinct Docker containers — each dedicated to one direction of the market.
+This matching engine is built with a strong focus on efficiency, parallelism, and safety. To achieve these goals, each engine instance is designed to handle a `single trading pair independently`. This isolation minimizes contingencies between markets and allows the system to scale horizontally.
+If bidirectional or cross-pair trading is required (for example, `USD/EUR` and `EUR/USD`), separated instances can be deployed — for instance, as two distinct Docker containers — each dedicated to one direction of the market.
 
 ![Architecture Overview](./assets/images/architecture-overview.png)
 
@@ -32,63 +31,156 @@ The mpsc channels will act as FIFO queues. This way, when the matching engine is
 
 ### Data Structure
 
-The matching engine uses a **hybrid structure** that combines hash maps and binary heaps to efficiently manage and match orders.
+The matching engine uses a **hybrid structure** that combines hashmaps and binary heaps to efficiently manage and match orders.
 
 ````
 pub type OrderQueue = LinkedHashmap<Order>;
 pub type OrderMap = HashMap<Price, OrderQueue>;
-pub type BidQueue = BTreeSet<Price>; // smallest first
-pub type AskQueue = BTreeSet<Reverse<Price>>; // greatest first
+pub type BidQueue = BTreeSet<Reverse<Price>>; // Ordered greatest to smallest
+pub type AskQueue = BTreeSet<Price>; // Ordered smallest to greatest
+
 
 pub struct OrderBook {
-    pub bids: OrderMap,
-    pub asks: OrderMap,
-    pub bids_queue: BidQueue,
-    pub asks_queue: AskQueue,
-    pub last_price: Price
+    bids: OrderMap,
+    asks: OrderMap,
+    bids_queue: BidQueue,
+    asks_queue: AskQueue,
 }
 ````
 
 - `OrderQueue`:
-Stores Order in a `LinkedHashmap` to ensure FIFO access from the linked list.
+Stores Order in a `LinkedHashmap<Order>`, a custom data structure defined to ensure FIFO access with efficient operations.
 - `OrderMap` (`HashMap<Price, OrderQueue>`)
-Each price level maps to a queue of orders (`OrderQueue`), stored as a stack (`VecDequeue<Order>`) sorted in a FIFO model (older orders have higher priority).
+Each price level maps to a queue of orders (`OrderQueue`), stored as a stack (`LinkedHashmap<Order>`) sorted in a FIFO model (older orders have higher priority).
     - `bids`:
     contains buy orders grouped by price.
     - `asks`:
     contains sell orders grouped by price.
 - `BidQueue` and `AskQueue`:
-These heaps maintain the set of active price levels, enabling quick access to the best bid (highest price) and best ask (lowest price) in O(1).
-- `BidQueue`:
+These `BTreeSet<Price>` maintain the set of active price levels, enabling quick access to the best bid (highest price) and best ask (lowest price).
+    - `BidQueue`:
 Prices for placed bids are uniquely stored in a descending order in a `BTreeSet<Price>` structure.
-- `AskQueue`:
+    - `AskQueue`:
 Prices for placed asks are uniquely stored in an ascending order in a `BTreeSet<Reverse<Price>>` structure.
-- `last_price`:
-Stores the last traded price for market reference.
 
 
 This structure optimizes for fast price-level access and priority matching:
-Using HashMap allows constant-time lookup of existing price levels.
-BinaryHeap ensures O(log n) insertion/removal while maintaining order priority (by price or time). Keeping separate global heaps for prices (BidQueue, AskQueue) avoids scanning all price levels to find the best price — crucial for real-time matching performance.
+Using HashMaps allows constant-time lookup of existing price levels and ensures insertion/removal while maintaining order priority. Keeping separate global BTreeSet for prices (BidQueue, AskQueue) avoids scanning all price levels to find the best price — crucial for real-time matching performance.
 
 This design balances speed, simplicity, and memory efficiency, and scales well under high-frequency trading workloads.
 
-### Matching flow
+### LinkedHashmap
+
+This custom data structure has been implemented to optimize the matching process. It does works as a LinkedList. It does contains each value into a Node double-linked to its previous and next sibling. These `prev` and `next` links keep the orders sorted by placed time for each of the prices available.
+
+LinkedHashmap<T> is a hybrid data structure that combines the fast lookups of a HashMap with the ordered traversal of a doubly linked list.
+It maintains **FIFO** (insertion) order while providing O(1) access, insertion, and removal by key.
+
+- `head` → ID of the first (oldest) element
+- `tail` → ID of the last (newest) element
+- `items` → hashmap for O(1) access by ID
+
+This makes LinkedHashmap ideal for systems like order books, LRU caches, or task queues where both ordering and fast random access are required.
+
+It does follow this simplified structure and interface:
+
+````
+pub trait HasId {
+    type Id: Eq + Hash + Clone;
+    fn id(&self) -> Self::Id;
+}
+
+struct Node<T: HasId> {
+    pub value: T,
+    pub next: Option<T::Id>,
+    pub prev: Option<T::Id>,
+}
+
+pub struct LinkedHashmap<T: HasId> {
+    head: Option<T::Id>,
+    tail: Option<T::Id>,
+    items: HashMap<T::Id, Node<T>>,
+}
+    pub fn new() -> Self {}
+
+    pub fn push(&mut self, value: T) {}
+
+    pub fn push_first(&mut self, value: T) {}
+
+    pub fn pop(&mut self) -> Option<T> {}
+
+    pub fn remove(&mut self, id: &T::Id) -> Option<T> {}
+
+    pub fn peek(&self) -> Option<&T> {}
+
+    pub fn peek_tail(&self) -> Option<&T> {}
+
+    pub fn get(&self, id: &T::Id) -> Option<&T> {}
+
+    pub fn get_mut(&mut self, id: &T::Id) -> Option<&mut T> {}
+
+    pub fn len(&self) -> usize {}
+
+    pub fn is_empty(&self) -> bool {}
+
+    pub fn contains(&self, id: &T::Id) -> bool {}
+
+    pub fn clear(&mut self) {}
+````
+
+##### Operation costs table:
+
+| Method | Description | Complexity (Big O) |
+| ------ | ----------- | ------------------ |
+| `push` | Insert element at the end | O(1) |
+| `push_first` | Insert element at the front | O(1) |
+| `pop` | Remove element from the head | O(1) |
+| `remove` | Remove element by ID | O(1) |
+| `peek` / `peek_tail` | Access first / last element | O(1) |
+| `get` / `get_mut` | Access element by ID | O(1) |
+| `contains` | Check if ID exists | O(1) |
+| `len` / `is_empty` | Size or emptiness check | O(1) |
+| `clear` | Remove all elements | O(n) |
+
+### OrderBook
+
+Engine runs an orderbook in memory to allow matching as fast and safe and possible. To achieve this efficiency, it does implement our `LinkedHashmap`internally.
+
+- `bids` / `asks` → map price levels to queues of orders (OrderQueue = LinkedHashmap<Order>)
+- `bids_queue` / `asks_queue` → maintain sorted price levels for fast best-price access
+
+````
+pub struct OrderBook {
+    bids: HashMap<Price, OrderQueue>,
+    asks: HashMap<Price, OrderQueue>,
+    bids_queue: BTreeSet<Reverse<Price>>, // descending order
+    asks_queue: BTreeSet<Price>,          // ascending order
+}
+impl OrderBook {
+    pub fn execute(&mut self, mut order: Order) -> Vec<Trade> {}
+    
+    pub fn cancel(&mut self, order: Order) {}
+}
+````
+
+### Matching orders flow
 
 The following diagram shows the flow to match an entry order:
 
 ![Matching Overview](./assets/images/matching-overview.png)
 
-#### Complexity
 
-| Operation | Description | Complexity |
-| --------- | ----------- | ---------- |
-| **Add order** | Insert order into price-level map + update prices queue | O(log n) |
-| **Find best bid/ask** | `.first()` of `BidQueue` or `AskQueue` | O(1) |
-| **Find specific price level** | HashMap lookup `bids` or `asks` | O(1) |
-| **Remove best bid/ask** | `pop_first()` of `BidQueue` or `AskQueue` | O(log n) |
-| **Remove price level** | Remove queue from map `bids` or `asks` | O(1) |
-| **Match order (partial/full)** | Pop from tree(s), update orders in maps and prices tree if needed | O(log n) |
+##### Operation costs table:
+
+| Method | Description | Complexity (Big O) |
+| ------ | ----------- | ------------------ |
+| `execute` | Match an incoming order against existing ones | O(n + k·log p) worst case, O(1) best case |
+| `cancel` | Remove an existing order by ID and price | O(1 + log p) |
+
+**Where:**
+- n = total number of orders in the book
+- k = number of price levels touched during execution
+- p = total number of price levels in the BTreeSet
 
 
 ## Development 

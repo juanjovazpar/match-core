@@ -1,7 +1,7 @@
 use std::{env};
 use dotenvy::dotenv;
 
-// mod server;
+mod server;
 mod engine;
 
 pub struct Message {
@@ -15,7 +15,7 @@ impl Message {
 
 #[tokio::main]
 async fn main() {
-    /* dotenv().ok();
+    dotenv().ok();
 
     let host = env::var("HOST")
         .unwrap_or_else(|_| "127.0.0.1"
@@ -33,5 +33,5 @@ async fn main() {
         while let Some(msg) = rx.recv().await {
             println!("Message incoming from engine: {}", msg.content);
         }
-    }); */
+    });
 }
