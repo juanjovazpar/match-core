@@ -1,15 +1,15 @@
 use std::collections::{BTreeSet, HashMap};
 use std::cmp::{Reverse};
 
+use crate::engine::order::{Price, Side};
 use super::linked_hashmap::LinkedHashmap;
 use super::order::Order;
-use crate::engine::order::{Price, Side};
 use super::trade::Trade;
 
 pub type OrderQueue = LinkedHashmap<Order>;
 pub type OrderMap = HashMap<Price, OrderQueue>;
-pub type BidQueue = BTreeSet<Price>;
-pub type AskQueue = BTreeSet<Reverse<Price>>;
+pub type BidQueue = BTreeSet<Reverse<Price>>; // Ordered mallest to greatest
+pub type AskQueue = BTreeSet<Price>; // Ordered greatest to mallest
 
 /* 
     `OrderBook` maintains the current state of a trading book with bids and asks.
@@ -36,26 +36,22 @@ impl OrderBook {
 
     fn get_best_price(&self, order: &Order) -> Option<Price> {
         match order.side {
-            Side::Bid => self.asks_queue.iter().next().map(|r| r.0),
-            Side::Ask => self.bids_queue.iter().next_back().copied(),
+            Side::Bid => self.asks_queue.first().copied(),
+            Side::Ask => self.bids_queue.first().map(|r| r.0),
         }
     }
 
     fn push(&mut self, order: Order) {
-        let map = match order.side {
+        match order.side {
             Side::Bid => {
-                self.bids_queue.insert(order.price);
-                &mut self.bids
+                self.bids_queue.insert(Reverse(order.price));
+                self.bids.entry(order.price).or_default().push(order);
             }
             Side::Ask => {
-                self.asks_queue.insert(Reverse(order.price));
-                &mut self.asks
+                self.asks_queue.insert(order.price);
+                self.asks.entry(order.price).or_default().push(order);
             }
-        };
-
-        map.entry(order.price)
-            .or_default()
-            .push(order);
+        }
     }
 
     pub fn execute(&mut self, mut order: Order) -> Vec<Trade> {
@@ -117,8 +113,8 @@ impl OrderBook {
             if queue.is_empty() {
                 map.remove(&best_price);
                 match order.side {
-                    Side::Bid => self.asks_queue.remove(&Reverse(best_price)),
-                    Side::Ask => self.bids_queue.remove(&best_price),
+                    Side::Bid => self.asks_queue.remove(&best_price),
+                    Side::Ask => self.bids_queue.remove(&Reverse(best_price)),
                 };
             }
         }
@@ -135,11 +131,64 @@ mod tests {
 
     #[test]
     fn creation() {
-        let mut book = OrderBook::new();
+        let book = OrderBook::new();
         let order = Order::new(Uuid::new_v4(), 100, 10, Side::Ask, Mode::Limit);
 
-        let trades = book.execute(order);
+        assert!(book.bids.is_empty(), "bids map should be empty");
+        assert!(book.asks.is_empty(), "asks map should be empty");
+        assert!(book.bids_queue.is_empty(), "bids queue should be empty");
+        assert!(book.asks_queue.is_empty(), "asks queue should be empty");
+        assert_eq!(book.get_best_price(&order), None);
+    }
+
+    #[test]
+    fn execute_without_trades() {
+        let mut book = OrderBook::new();
+        let best_price = 10;
+        let ask_order_1 = Order::new(Uuid::new_v4(), 100, best_price, Side::Ask, Mode::Market);
+        let ask_order_2 = Order::new(Uuid::new_v4(), 100, 15, Side::Ask, Mode::Market);
+        let bid_order_1 = Order::new(Uuid::new_v4(), 100, 9, Side::Bid, Mode::Market);
+
+        book.execute(ask_order_1);
+        book.execute(ask_order_2);
+        
+        assert_eq!(book.get_best_price(&bid_order_1), Some(best_price));
+
+        let trades = book.execute(bid_order_1);
 
         assert_eq!(trades.len(), 0);
+    }
+
+    #[test]
+    fn execute_with_one_trade() {
+        let mut book = OrderBook::new();
+        let best_price = 10;
+        let ask_order_1 = Order::new(Uuid::new_v4(), 100, best_price, Side::Ask, Mode::Market);
+        let ask_order_2 = Order::new(Uuid::new_v4(), 100, 15, Side::Ask, Mode::Market);
+        let bid_order_1 = Order::new(Uuid::new_v4(), 100, best_price, Side::Bid, Mode::Market);
+
+        book.execute(ask_order_1);
+        book.execute(ask_order_2);
+        
+        assert_eq!(book.get_best_price(&bid_order_1), Some(best_price));
+
+        let trades = book.execute(bid_order_1);
+
+        assert_eq!(trades.len(), 1);
+    }
+
+    #[test]
+    fn execute_with_two_trades() {
+        let mut book = OrderBook::new();
+        let ask_order_1 = Order::new(Uuid::new_v4(), 100, 10, Side::Ask, Mode::Market);
+        let ask_order_2 = Order::new(Uuid::new_v4(), 100, 9, Side::Ask, Mode::Market);
+        let bid_order_1 = Order::new(Uuid::new_v4(), 200, 12, Side::Bid, Mode::Market);
+
+        book.execute(ask_order_1);
+        book.execute(ask_order_2);
+        
+        let trades = book.execute(bid_order_1);
+
+        assert_eq!(trades.len(), 2);
     }
 }
