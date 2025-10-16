@@ -1,0 +1,29 @@
+version: "3.9"
+services:
+  redis:
+    image: redis:7
+    container_name: redis
+    ports:
+      - "${REDIS_PORT}:6379"
+    volumes:
+      - redis_data:/data
+    restart: always
+
+  engine:
+    container_name: engine
+    build:
+      context: .
+      target: dev-runtime
+    env_file:
+      - .env
+    ports:
+      - "${PORT}:${PORT}"
+    volumes:
+      - ./src:/app/src
+      - ./Cargo.toml:/app/Cargo.toml
+      - ./Cargo.lock:/app/Cargo.lock
+    depends_on:
+      - redis
+
+volumes:
+  redis_data:

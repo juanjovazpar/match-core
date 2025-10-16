@@ -215,7 +215,7 @@ cargo install --path .
 #### Start development mode
 
 ````
-cargo watch -x run
+docker compose up -d
 ````
 
 #### Start testing mode
