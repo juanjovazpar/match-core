@@ -26,7 +26,7 @@ To maximize parallelism and minimize thread blocking and bottlenecks, the engine
 - **Server Layer:** server for client connections. It does include a minimal API rest to manage orders and a socket channel to be updated with the order book changes.
 - **Matching Engine Core:** the heart of the system, where the order book exists and the trades are created through matching orders.
 - **Event System:** two **mspc** channels connect the execution threads and keep the paralellism efficient. The <span style="color:#f57751;">red channel</span> allows the connection to the engine while the <span style="color:#5951f5;">blue channel</span> helps the enginee to broadcast the changes.
-The mpsc channels will act as FIFO queues. This way, when the matching engine is busy and cannot process an incoming order, that order will wait in the queue until it is executed.
+The mpsc channels will act as **FIFO** queues. This way, when the matching engine is busy and cannot process an incoming order, that order will wait in the queue until it is executed.
 - **Persistency Layer:** stores the orders and trades. It also in charge to create snapshots of the orderbook for recovery.
 
 ### Data Structure
@@ -49,9 +49,9 @@ pub struct OrderBook {
 ````
 
 - `OrderQueue`:
-Stores Order in a `LinkedHashmap<Order>`, a custom data structure defined to ensure FIFO access with efficient operations.
+Stores `Order` in a `LinkedHashmap<Order>`, a custom data structure defined to ensure **FIFO** access with efficient operations.
 - `OrderMap` (`HashMap<Price, OrderQueue>`)
-Each price level maps to a queue of orders (`OrderQueue`), stored as a stack (`LinkedHashmap<Order>`) sorted in a FIFO model (older orders have higher priority).
+Each price level maps to a queue of orders (`OrderQueue`), stored as a stack (`LinkedHashmap<Order>`) sorted in a **FIFO** model (older orders have higher priority).
     - `bids`:
     contains buy orders grouped by price.
     - `asks`:
@@ -71,7 +71,7 @@ This design balances speed, simplicity, and memory efficiency, and scales well u
 
 ### LinkedHashmap
 
-This custom data structure has been implemented to optimize the matching process. It does works as a LinkedList. It does contains each value into a Node double-linked to its previous and next sibling. These `prev` and `next` links keep the orders sorted by placed time for each of the prices available.
+This custom data structure has been implemented to optimize the matching process. It does works as a `LinkedList`. It does contains each value into a Node double-linked to its previous and next sibling. These `prev` and `next` links keep the orders sorted by placed time for each of the prices available.
 
 LinkedHashmap<T> is a hybrid data structure that combines the fast lookups of a HashMap with the ordered traversal of a doubly linked list.
 It maintains **FIFO** (insertion) order while providing O(1) access, insertion, and removal by key.
