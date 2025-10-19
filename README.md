@@ -4,6 +4,8 @@ This project implements a **centralized matching engine**, the fundamental compo
 
 Our implementation is written in **Rust**, leveraging its safety guarantees and concurrency model to deliver **low latency, high throughput, and fault-tolerant order processing**. It is designed as a self-contained service that can run as a microservice in any system.
 
+**This repository is an isolated component of the project [Exchain](https://github.com/juanjovazpar/exchain):**
+
 ## Key Features
 
 - **Order Handling:** supports limit and market orders.
@@ -223,4 +225,6 @@ docker compose up -d
 ````
 cargo watch -x test
 ````
+
+
 

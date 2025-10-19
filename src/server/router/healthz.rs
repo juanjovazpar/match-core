@@ -12,5 +12,5 @@ async fn get_handler() -> &'static str {
 
     let _ = tx.send(Message::new(String::from("hello engine"))).await;
 
-    "Healthy❤️!"
+    "Match Core is healthy ❤️!"
 }
