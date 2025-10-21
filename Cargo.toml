@@ -2,6 +2,7 @@
 name = "match_core"
 version = "0.1.0"
 edition = "2024"
+authors = ["juanjo <https://github.com/juanjovazpar>"]
 
 [dependencies]
 dotenvy = "0.15" 
@@ -17,3 +18,6 @@ bincode = "2.0.0"
 chrono = "0.4"
 uuid = { version = "1", features = ["v4"] }
 once_cell = "1.21.3"
+# exchain-commons = { git = "https://github.com/juanjovazpar/exchain-commons", branch = "master" }
+exchain-commons = { path = "../exchain-commons" }
+tonic = "0.14.2"

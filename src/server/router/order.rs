@@ -1,7 +1,7 @@
 use axum::{routing::post, Router, Json, http::StatusCode};
 use serde::Deserialize;
 
-use crate::engine::order::{Price, Quantity};
+use exchain_commons::structs::{order::{Price, Quantity}};
 
 use super::paths;
 

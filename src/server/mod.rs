@@ -4,7 +4,6 @@ use tokio::sync::mpsc::{Sender};
 
 mod router;
 mod channel;
-mod middlewares;
 use crate::Message;
 use crate::server::channel::set_sender;
 
