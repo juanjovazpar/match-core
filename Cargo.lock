@@ -346,6 +346,7 @@ dependencies = [
 [[package]]
 name = "exchain-commons"
 version = "0.1.0"
+source = "git+ssh://git@github.com/juanjovazpar/exchain-commons.git?branch=master#f848c4ef761eb243637e97d0f341f9866f6a9d21"
 dependencies = [
  "axum 0.7.9",
  "chrono",

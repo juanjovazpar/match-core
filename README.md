@@ -216,8 +216,17 @@ cargo install --path .
 
 #### Start development mode
 
+We must use `ssh` to authenticate our build and be able to download private repositories in Github.
+
+First, ensure `ssh-agent` is running:
 ````
-docker compose up -d
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/{YOUR_SSH_KEY}
+´´´´
+
+Then run the container:
+````
+DOCKER_BUILDKIT=1 docker-compose up --build
 ````
 
 #### Start testing mode

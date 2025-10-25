@@ -4,7 +4,6 @@ use dotenvy::dotenv;
 use tonic::{transport::Server, Request, Response, Status};
 use exchain_commons::api::{order_service_server::{OrderService, OrderServiceServer}, Order, OrderAck}; 
 
-mod server;
 mod engine;
 
 pub struct Message {
@@ -31,12 +30,12 @@ impl OrderService for MyOrderService {
 async fn main() {
     dotenv().ok();
 
-    let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let port = env::var("PORT").unwrap_or_else(|_| "3000".to_string());
+    // let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
+    // let port = env::var("PORT").unwrap_or_else(|_| "3000".to_string());
 
-    let (tx, _) = engine::start().await;
+    let (_, _) = engine::start().await;
 
-    let server_task = tokio::spawn(server::start(host, port, tx));
+    // let server_task = tokio::spawn(server::start(host, port, tx));
     /* let listener_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await.or(Some(Message::new("noop".to_string()))) {
             println!("Message incoming from engine: {}", msg.content);
@@ -56,7 +55,7 @@ async fn main() {
     //
 
     tokio::select! {
-        _ = server_task => {},
+        // _ = server_task => {},
         _ = tokio::signal::ctrl_c() => {
             println!("Shutdown signal received");
         }
