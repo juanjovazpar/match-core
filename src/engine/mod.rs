@@ -3,7 +3,7 @@ use std::env;
 use dotenvy::dotenv;
 use uuid::Uuid;
 use tokio::sync::mpsc::{self, Sender, Receiver};
-use crate::{engine::{order_book::OrderBook}, Message};
+use crate::{engine::{order_book::OrderBook}};
 use exchain_commons::structs::{linked_hashmap, order::{self, Order, Side, Mode}, trade};
 
 mod order_book;

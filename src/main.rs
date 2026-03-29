@@ -1,68 +1,115 @@
-use std::{env, net::SocketAddr};
+use std::{sync::Arc, thread};
 use dotenvy::dotenv;
+use tracing_subscriber::fmt::{init as tracingInit};
 
-use tonic::{transport::Server, Request, Response, Status};
-use exchain_commons::api::{order_service_server::{OrderService, OrderServiceServer}, Order, OrderAck}; 
+/*
+use std::time::Duration;
 
-mod engine;
+use crate::domain::matching::MatchingEngine;
+use crate::snapshot::snapshotter::Snapshotter;
+use crate::storage::snapshot_store::SnapshotStore;
+use crate::transport::grpc::GrpcServer;
+ */
 
-pub struct Message {
-    content: String
-}
-impl Message {
-    pub fn new(content: String) -> Self {
-        Self { content }
-    }
-}
+mod shared;
+mod core;
+mod config;
+mod domain;
+mod utils;
+mod events;
 
-#[derive(Default)]
-pub struct MyOrderService;
-
-#[tonic::async_trait]
-impl OrderService for MyOrderService {
-    async fn send_order(&self, request: Request<Order>) -> Result<Response<OrderAck>, Status> {
-        let order = request.into_inner();
-        Ok(Response::new(OrderAck { id: order.id, accepted: true }))
-    }
-}
-
-#[tokio::main]
-async fn main() {
+use crate::config::load_config;
+use crate::events::publisher::Publisher;
+use crate::core::{engine::Engine, deduplicator::Deduplicator, log_writter::LogWriter, sequencer::Sequencer};
+use crate::domain::matching::MatchingEngine;
+use crate::shared::{
+    channel::Channels
+};
+fn main() {
+    // --------------------------------------------------
+    // Set configuration
+    // --------------------------------------------------
+    tracingInit();
     dotenv().ok();
 
-    // let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    // let port = env::var("PORT").unwrap_or_else(|_| "3000".to_string());
+    let config = Arc::new(load_config());
+    let log_path = format!("{}/wal.log", config.storage.data_dir);
+    let segment_size = config.storage.log_file_segment_size.clone();
+    let event_bus_config = config.event_bus.clone();
 
-    let (_, _) = engine::start().await;
+    print!("Match-core initiated with config: {:?}", config);
+    
+    // --------------------------------------------------
+    // Create channels to allow communication between threads
+    // --------------------------------------------------
+    let channels = Channels::new();
+    let command_rx = channels.command_rx;
+    let event_rx = channels.event_rx;
+    let event_tx = channels.event_tx.clone();
 
-    // let server_task = tokio::spawn(server::start(host, port, tx));
-    /* let listener_task = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await.or(Some(Message::new("noop".to_string()))) {
-            println!("Message incoming from engine: {}", msg.content);
-        }
-    }); */
+    // --------------------------------------------------
+    // Instantiate the core thread to run the engine
+    // --------------------------------------------------
+    let mut engine = Engine {
+        command_rx,
+        event_tx,
+        sequencer: Sequencer::new(),
+        wal: LogWriter::new(&log_path, segment_size),
+        dedup: Deduplicator::new(),
+        matching: MatchingEngine::new(),
+    };
 
-    // gRPC connection to Gatekeeper
-    let my_service = MyOrderService::default();
-    let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let port = env::var("GRPC_PORT").unwrap_or_else(|_| "50051".to_string());
-    let addr = format!("{}:{}", host, port).parse::<SocketAddr>().unwrap();
+    thread::spawn(move || {
+        engine.run();
+    });
 
-
-    let grpc_server = Server::builder()
-        .add_service(OrderServiceServer::new(my_service))
-        .serve(addr);
-    //
-
-    tokio::select! {
-        // _ = server_task => {},
-        _ = tokio::signal::ctrl_c() => {
-            println!("Shutdown signal received");
-        }
-        res = grpc_server => {
-            if let Err(e) = res {
-                eprintln!("gRPC server error: {}", e);
-            }
-        }
-    }
+    // --------------------------------------------------
+    // Instantiate the core thread for the event publisher
+    // --------------------------------------------------+
+    thread::spawn(move || {
+        let publisher = Publisher::new(event_rx, event_bus_config);
+        publisher.run();
+    });
 }
+
+/*
+    {
+        shard: ShardConfig { id: "shard-1",
+        pair_symbols: "BTC-USD" },
+        grpc: GrpcConfig { port: 50051 },
+        storage: StorageConfig { data_dir: "/data", log_file_segment_size: "128MB" },
+        snapshot: SnapshotConfig { interval_seconds: 30, max_commands: 10000 },
+        event_bus: EventBusConfig { type: "nats", url: "nats://localhost:4222" },
+        engine: EngineConfig { max_inflight_commands: 10000 }
+    }
+    
+fn backup() {
+    // --------------------------------------------------
+    // 5. Spawn SNAPSHOT thread
+    // --------------------------------------------------
+    let snapshot_store = SnapshotStore::new("data/snapshots");
+    let snapshotter = Snapshotter::new(
+        || {
+            // ⚠️ aquí deberías capturar estado real del engine
+            vec![] // placeholder
+        },
+        snapshot_store,
+        Duration::from_secs(10),
+    );
+
+    snapshotter.run();
+
+    // --------------------------------------------------
+    // 6. Start gRPC server (producer of commands)
+    // --------------------------------------------------
+    let grpc = GrpcServer::new(channels.command_tx.clone());
+
+    // Simulación de requests
+    loop {
+        // aquí iría tonic::Server en producción
+        thread::sleep(Duration::from_secs(60));
+
+        // evita que main termine
+        let _ = &grpc;
+    }
+} */

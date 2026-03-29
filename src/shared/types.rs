@@ -1,0 +1,11 @@
+pub type CommandId = String;
+pub type CommandSeq = u64;
+pub type EventSeq = u64;
+pub type Timestamp = u64;
+pub type TradeSeq = u64;
+pub type TradeId = u64;
+pub type OrderId = u64;
+pub type Price = f64;
+pub type Quantity = f64;
+pub type UserId = String;
+pub type Symbol = String;

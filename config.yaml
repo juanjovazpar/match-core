@@ -1,0 +1,21 @@
+shard:
+  id: btc-usd
+  pair_symbols: "BTC-USD"
+
+grpc:
+  port: 50051
+
+storage:
+  data_dir: "./logs"
+  log_file_segment_size: 128MB
+
+snapshot:
+  interval_seconds: 30
+  max_commands: 10000
+
+event_bus:
+  type: nats
+  url: "nats://localhost:4222"
+
+engine:
+  max_inflight_commands: 10000
