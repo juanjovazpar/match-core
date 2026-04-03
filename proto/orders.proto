@@ -58,6 +58,9 @@ enum CmdErr {
   CMD_ERR_SUBMIT_ORDER_TIME_IN_FORCE_UNSPECIFIED = 18;
   CMD_ERR_SUBMIT_ORDER_TIME_IN_FORCE_INVALID = 19;
   CMD_ERR_SUBMIT_TIMESTAMP_ZERO = 20;
+  // Bounded wait to enqueue into the engine command channel expired (global backpressure).
+  CMD_ERR_SUBMIT_COMMAND_QUEUE_TIMEOUT = 21;
+  CMD_ERR_CANCEL_COMMAND_QUEUE_TIMEOUT = 22;
 }
 
 message SubmitOrderCmdRequest {

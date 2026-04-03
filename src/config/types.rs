@@ -43,6 +43,10 @@ fn default_grpc_max_encoding_message_bytes() -> usize {
     4 * 1024 * 1024
 }
 
+fn default_grpc_command_enqueue_timeout_ms() -> u64 {
+    5_000
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct GrpcConfig {
     pub port: u16,
@@ -61,6 +65,9 @@ pub struct GrpcConfig {
     /// Max encoded gRPC message size for egress (per service).
     #[serde(default = "default_grpc_max_encoding_message_bytes")]
     pub max_encoding_message_bytes: usize,
+    /// Max time to wait for a slot in the engine command queue before rejecting the RPC.
+    #[serde(default = "default_grpc_command_enqueue_timeout_ms")]
+    pub command_enqueue_timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]

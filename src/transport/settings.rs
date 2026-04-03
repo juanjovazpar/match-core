@@ -1,5 +1,7 @@
 //! Ingress server options owned by the transport layer (no dependency on `config`).
 
+use std::time::Duration;
+
 #[derive(Debug, Clone)]
 pub struct GrpcTlsOptions {
     pub cert_path: String,
@@ -14,6 +16,8 @@ pub struct GrpcServeOptions {
     pub concurrency_limit_per_connection: usize,
     pub max_decoding_message_bytes: usize,
     pub max_encoding_message_bytes: usize,
+    /// Max wait when sending into the bounded engine command channel (transport admission).
+    pub command_enqueue_timeout: Duration,
     pub tls: Option<GrpcTlsOptions>,
 }
 
@@ -29,6 +33,9 @@ impl GrpcServeOptions {
             anyhow::bail!(
                 "grpc max_decoding_message_bytes and max_encoding_message_bytes must be greater than 0"
             );
+        }
+        if self.command_enqueue_timeout.is_zero() {
+            anyhow::bail!("grpc.command_enqueue_timeout_ms must be greater than 0");
         }
         if let Some(tls) = &self.tls {
             if let Some(ca) = tls.client_ca_path.as_deref() {

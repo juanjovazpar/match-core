@@ -8,7 +8,7 @@ use tokio::runtime::{Builder, Runtime};
 use tracing::info;
 use tracing_subscriber::fmt::init as tracingInit;
 
-use crate::transport::service::serve;
+use crate::transport::grpc_serve::serve;
 
 mod config;
 mod core;
@@ -51,6 +51,7 @@ fn main() {
     let event_bus_config = config.event_bus.clone();
     let grpc_port = config.grpc.port;
     let grpc_serve_opts = grpc_serve_options(&config.grpc);
+    let command_enqueue_timeout = grpc_serve_opts.command_enqueue_timeout;
     let shard_symbol = config.shard.pair_symbols.clone();
     let command_channel_capacity = config.engine.command_channel_capacity;
     if command_channel_capacity == 0 {
@@ -90,7 +91,7 @@ fn main() {
     // --------------------------------------------------
     // Instantiate gRPC server thread (command ingress)
     // --------------------------------------------------
-    let dispatcher = Dispatcher::new(command_tx);
+    let dispatcher = Dispatcher::new(command_tx, command_enqueue_timeout);
     thread::spawn(move || {
         let runtime = Runtime::new().expect("failed to create Tokio runtime for gRPC server");
         let addr = SocketAddr::from(([0, 0, 0, 0], grpc_port));

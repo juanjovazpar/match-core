@@ -72,10 +72,10 @@ Order commands enter the process through **gRPC** (HTTP/2), implemented with **T
 | Piece | Role |
 | ----- | ---- |
 | **Proto / codegen** | `proto/orders.proto` is compiled in `build.rs`; generated types live under `transport::proto::pb` (`matchcore.v1`). |
-| **`transport::service::serve`** | Binds the Tonic server: TLS/plaintext, timeouts, concurrency per connection, request tracing spans, registers the order command service. |
+| **`transport::grpc_serve::serve`** | Binds the Tonic server: TLS/plaintext, timeouts, concurrency per connection, request tracing spans, registers the order command service. |
 | **`transport::orders_service`** | Tonic implementation of `OrderCmdService` (Submit / Cancel): validation, metrics, dispatch. |
 | **`transport::orders_service::validator`** | Validates protobuf requests (enums, numeric fields, ids, shard symbol) before building `shared::command::Command`. |
-| **`transport::dispatcher`** | Async `submit`: sends `Command` into a **bounded** `tokio::sync::mpsc` channel toward the engine (`DispatchError` if the receiver is gone). |
+| **`transport::dispatcher`** | Async `submit`: bounded wait (`grpc.command_enqueue_timeout_ms`) on `tokio::sync::mpsc::send`; `DispatchError::EnqueueTimeout` if the engine queue stays full; `ChannelClosed` if the receiver is gone. |
 | **`transport::settings::GrpcServeOptions`** | Transport-owned snapshot of server tuning + TLS paths. **No dependency on `config`.** |
 | **`transport::metrics`** | Prometheus-friendly counters for ingress outcomes (see below). |
 
@@ -83,19 +83,20 @@ Order commands enter the process through **gRPC** (HTTP/2), implemented with **T
 
 1. Client calls `Submit` or `Cancel` on `matchcore.v1.OrderCmdService`.
 2. **`validator`** checks the request; on failure the RPC still returns **HTTP OK** with `OrderCmdReply` status **rejected** and a `CmdErr` code (application-level rejection, not gRPC `Status` for validation errors).
-3. On success, a **`Command`** is built and **`dispatcher.submit(cmd).await`** enqueues it for the engine.
-4. If the engine command channel is closed, the reply is rejected with an engine-unavailable error code and logged.
+3. On success, a **`Command`** is built and **`dispatcher.submit(cmd).await`** tries to enqueue for the engine (waits up to **`grpc.command_enqueue_timeout_ms`** for a slot).
+4. If the wait expires while the queue stays full, the reply is **rejected** with `CmdErr` **submit/cancel command queue timeout** and metric `rejected_command_queue_timeout`.
+5. If the engine command channel is closed, the reply is rejected with an engine-unavailable error code and logged.
 
 ### Architectural decisions
 
 - **gRPC instead of REST for commands** — binary, schema-first (`proto`), fits high-throughput internal ingress; clients need the `.proto` or compatible codegen.
 - **Transport decoupled from `config`** — `GrpcServeOptions` / `GrpcTlsOptions` are defined in `transport::settings`. The binary maps YAML/env via `config::grpc_bridge::grpc_serve_options(&config.grpc)` so the transport layer does not import `config::types`.
-- **Bounded async command queue** — `tokio::sync::mpsc` with capacity from `engine.command_channel_capacity` (default `65536`). This provides **backpressure**: a full queue blocks `send().await` on the gRPC worker until the engine drains. Event emission to NATS still uses **`std::sync::mpsc`** on a separate thread (sync publisher); only the **command** path is async Tokio.
+- **Bounded async command queue** — `tokio::sync::mpsc` with capacity from `engine.command_channel_capacity` (default `65536`). **Transport admission**: `dispatcher` wraps `send` in `tokio::time::timeout` (`grpc.command_enqueue_timeout_ms`, default **5s**). A full queue blocks only until either a slot opens or the timeout fires (then RPC rejects to cap ingress latency). Event emission to NATS still uses **`std::sync::mpsc`** on a separate thread; only the **command** path is async Tokio.
 - **Two Tokio runtimes** — the matching engine loop runs on a **current-thread** runtime in its own OS thread; gRPC runs on a **multi-thread** runtime. This isolates scheduling: network I/O does not share the engine’s single task queue.
 - **Structured errors for dispatch** — `dispatcher::DispatchError` uses **`thiserror`**; ingress uses **`tracing`** with fields (`rpc`, `command_id`, `order_id`, etc.). These are complementary (types vs logs).
 - **TLS and mTLS are optional** — omit `grpc.tls` for **plaintext**. With `grpc.tls`, set `cert_path` + `key_path` for server TLS. Add `client_ca_path` to require (or optionally allow) **client certificates** (`client_auth_optional`, default `false` when verifying clients).
 - **Server hardening** — per-request timeout, per-connection concurrency limit, max encode/decode message sizes on the service, optional TLS/mTLS (rustls via Tonic’s `tls-ring` feature).
-- **Observability** — optional **`observability.metrics_listen_addr`** starts a Prometheus scrape HTTP listener (`metrics` + `metrics-exporter-prometheus`). Counter: `match_core_grpc_requests_total` with labels `rpc` (`submit` \| `cancel`) and `outcome` (`queued`, `rejected_validation`, `rejected_engine_unavailable`). If metrics are disabled, counter macros no-op until a global recorder is installed.
+- **Observability** — optional **`observability.metrics_listen_addr`** starts a Prometheus scrape HTTP listener (`metrics` + `metrics-exporter-prometheus`). Counter: `match_core_grpc_requests_total` with labels `rpc` (`submit` \| `cancel`) and `outcome` (`queued`, `rejected_validation`, `rejected_engine_unavailable`, `rejected_command_queue_timeout`). If metrics are disabled, counter macros no-op until a global recorder is installed.
 
 ### Layout (source)
 
@@ -104,7 +105,7 @@ src/transport/
   mod.rs              # module tree
   proto.rs            # include_proto!("matchcore.v1")
   settings.rs         # GrpcServeOptions, validation
-  service.rs          # serve(...) — Tonic Server::builder
+  grpc_serve.rs       # serve(...) — Tonic Server::builder
   dispatcher.rs
   metrics.rs
   orders_service/
@@ -122,6 +123,7 @@ src/transport/
 | `grpc.request_timeout_secs` | Tonic server per-request timeout (default `30`). |
 | `grpc.concurrency_limit_per_connection` | Max in-flight requests per HTTP/2 connection (default `256`). |
 | `grpc.max_decoding_message_bytes` / `max_encoding_message_bytes` | gRPC message size limits (default 4 MiB). |
+| `grpc.command_enqueue_timeout_ms` | Max wait for space in the engine command queue before rejecting the RPC (default `5000`). Must be greater than 0. |
 | `engine.command_channel_capacity` | Tokio command channel depth (default `65536`). |
 | `observability.metrics_listen_addr` | Optional `host:port` for Prometheus scrape (e.g. `0.0.0.0:9090`). |
 | `shard.pair_symbols` | Symbol the shard accepts; must match incoming submit requests. |

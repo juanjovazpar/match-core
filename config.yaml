@@ -9,6 +9,8 @@ grpc:
   # concurrency_limit_per_connection: 256
   # max_decoding_message_bytes: 4194304
   # max_encoding_message_bytes: 4194304
+  # Max wait (ms) for a slot in the engine command queue; then RPC rejects (protects ingress latency).
+  # command_enqueue_timeout_ms: 5000
   # Uncomment and point to PEM files to enable TLS (HTTP/2 over TLS).
   # tls:
   #   cert_path: "./certs/server.pem"
