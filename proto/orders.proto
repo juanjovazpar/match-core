@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package matchcore.v1;
+
+service OrderCmdService {
+  rpc Submit(SubmitOrderCmdRequest) returns (OrderCmdReply);
+  rpc Cancel(CancelOrderCmdRequest) returns (OrderCmdReply);
+}
+
+enum Side {
+  SIDE_UNSPECIFIED = 0;
+  SIDE_BUY = 1;
+  SIDE_SELL = 2;
+}
+
+enum Type {
+  TYPE_UNSPECIFIED = 0;
+  TYPE_LIMIT = 1;
+  TYPE_MARKET = 2;
+}
+
+enum OrderCmdAck {
+  ORDER_CMD_ACK_UNSPECIFIED = 0;
+  ORDER_CMD_ACK_QUEUED = 1;
+  ORDER_CMD_ACK_REJECTED = 2;
+}
+
+// Time in force types:
+// `GTC` (Good Till Cancelled) → lives until is cancelled
+// `IOC` (Immediate Or Cancel) → executes what is possible, cancel the remaining
+// `FOK` (Fill Or Kill) → executes completely or cancel completely
+enum TimeInForce {
+  TIME_IN_FORCE_UNSPECIFIED = 0;
+  TIME_IN_FORCE_GTC = 1;
+  TIME_IN_FORCE_IOC = 2;
+  TIME_IN_FORCE_FOK = 3;
+}
+
+enum CmdErr {
+  CMD_ERR_UNSPECIFIED = 0;
+  CMD_ERR_SUBMIT_SIDE_UNSPECIFIED = 1;
+  CMD_ERR_SUBMIT_ORDER_TYPE_UNSPECIFIED = 2;
+  CMD_ERR_SUBMIT_CMD_ID_EMPTY = 3;
+  CMD_ERR_SUBMIT_ORDER_ID_EMPTY = 4;
+  CMD_ERR_SUBMIT_USER_ID_EMPTY = 5;
+  CMD_ERR_SUBMIT_SYMBOL_EMPTY = 6;
+  CMD_ERR_SUBMIT_SYMBOL_SHARD_MISMATCH = 7;
+  CMD_ERR_SUBMIT_SIDE_INVALID = 8;
+  CMD_ERR_SUBMIT_ORDER_TYPE_INVALID = 9;
+  CMD_ERR_SUBMIT_ENGINE_UNAVAILABLE = 10;
+  CMD_ERR_SUBMIT_PRICE_INVALID = 11;
+  CMD_ERR_SUBMIT_QTY_INVALID = 12;
+  CMD_ERR_CANCEL_CMD_ID_EMPTY = 13;
+  CMD_ERR_CANCEL_ENGINE_UNAVAILABLE = 14;
+  CMD_ERR_CANCEL_ORDER_ID_EMPTY = 15;
+  CMD_ERR_CANCEL_TIMESTAMP_ZERO = 16;
+  CMD_ERR_CANCEL_TIMESTAMP__UNSPECIFIED = 17;
+  CMD_ERR_SUBMIT_ORDER_TIME_IN_FORCE_UNSPECIFIED = 18;
+  CMD_ERR_SUBMIT_ORDER_TIME_IN_FORCE_INVALID = 19;
+  CMD_ERR_SUBMIT_TIMESTAMP_ZERO = 20;
+}
+
+message SubmitOrderCmdRequest {
+  string command_id = 1;
+  string order_id = 2;
+  string user_id = 3;
+  string symbol = 4;
+  Side side = 5;
+  Type order_type = 6;
+  double price = 7;
+  double quantity = 8;
+  uint64 timestamp = 9;
+  TimeInForce time_in_force = 10;
+}
+
+message OrderCmdReply {
+  string order_id = 1;
+  OrderCmdAck status = 2;
+  optional CmdErr error_code = 3;
+}
+
+message CancelOrderCmdRequest {
+  string command_id = 1;
+  string order_id = 2;
+  uint64 timestamp = 3;
+}

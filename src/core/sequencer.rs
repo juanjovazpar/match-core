@@ -1,7 +1,7 @@
 use crate::shared::types::{CommandSeq, EventSeq, TradeSeq};
 
 /// Sequencer acts a clock to ensure consistent replay
-/// 
+///
 /// It is responsible for generating monotonically increasing identifiers
 /// used to guarantee ordering and determinism within the matching engine.
 ///
@@ -9,7 +9,7 @@ use crate::shared::types::{CommandSeq, EventSeq, TradeSeq};
 /// - command_seq → total order of incoming commands
 /// - event_seq   → total order of emitted events
 /// - trade_seq   → ordered sequence of trades
-/// 
+///
 pub struct Sequencer {
     pub command_seq: CommandSeq,
     pub event_seq: EventSeq,

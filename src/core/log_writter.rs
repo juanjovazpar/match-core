@@ -1,12 +1,12 @@
 use crate::shared::types::CommandSeq;
 use crate::shared::{command::Command, event::EventEnvelope};
-use std::fs::{OpenOptions};
+use std::fs::OpenOptions;
 use std::io::Write;
 
 /// LogWriter responsible for durability of the engine.
 ///
 /// Ensures that every command and resulting events are persisted to disk
-/// before being applied to the in-memory state. It is append-only 
+/// before being applied to the in-memory state. It is append-only
 /// and strictly ordered by sequence numbers.
 /// TODO: Optimize file writing to make it faster
 pub struct LogWriter {
@@ -21,7 +21,7 @@ impl LogWriter {
             .open(path)
             .unwrap();
 
-        Self { file, segment_size}
+        Self { file, segment_size }
     }
 
     pub fn write_command(&mut self, seq: CommandSeq, cmd: &Command) {
@@ -43,21 +43,22 @@ impl LogWriter {
 #[cfg(test)]
 mod tests {
     use super::LogWriter;
-    use crate::shared::command::{Command, NewOrderCommand, OrderType, Side};
+    use crate::shared::command::{Command, NewOrderCommand, Side, TimeInForce, Type};
     use crate::shared::event::{Event, EventEnvelope, OrderAccepted};
     use std::fs;
 
     fn sample_command() -> Command {
         Command::NewOrder(NewOrderCommand {
             command_id: "cmd-1".into(),
-            order_id: 42,
+            order_id: "42".into(),
             user_id: "u1".into(),
             symbol: "BTC-USD".into(),
             side: Side::Buy,
-            order_type: OrderType::Limit,
+            order_type: Type::Limit,
             price: 1.0,
             quantity: 2.0,
             timestamp: 99,
+            time_in_force: TimeInForce::GTC,
         })
     }
 
@@ -67,7 +68,7 @@ mod tests {
             command_seq: 7,
             timestamp: 100,
             event: Event::OrderAccepted(OrderAccepted {
-                order_id: 42,
+                order_id: "42".into(),
                 user_id: "u1".into(),
                 symbol: "BTC-USD".into(),
             }),

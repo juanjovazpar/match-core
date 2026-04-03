@@ -1,5 +1,5 @@
 use crate::config::types::EventBusConfig;
-use crate::events::bus::{create_event_bus, EventBus};
+use crate::events::bus::{EventBus, create_event_bus};
 use crate::events::{queue::EventReceiver, serializer::serialize};
 use crate::shared::event::EventEnvelope;
 

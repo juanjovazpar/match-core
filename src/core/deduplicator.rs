@@ -1,5 +1,5 @@
-use std::collections::HashSet;
 use crate::shared::command::Command;
+use std::collections::HashSet;
 
 /// Deduplicator component for incoming commands.
 ///
@@ -28,7 +28,7 @@ impl Deduplicator {
         }
 
         self.seen.insert(id);
-        return false
+        return false;
     }
 
     fn extract_id(command: &Command) -> String {
@@ -43,29 +43,28 @@ impl Deduplicator {
 mod tests {
     use super::Deduplicator;
     use crate::shared::command::{
-        CancelOrderCommand, Command, NewOrderCommand, OrderType, Side,
+        CancelOrderCommand, Command, NewOrderCommand, Side, TimeInForce, Type,
     };
 
     fn new_order(command_id: &str) -> Command {
         Command::NewOrder(NewOrderCommand {
             command_id: command_id.into(),
-            order_id: 1,
+            order_id: "1".into(),
             user_id: "u1".into(),
             symbol: "BTC-USD".into(),
             side: Side::Buy,
-            order_type: OrderType::Limit,
+            order_type: Type::Limit,
             price: 1.0,
             quantity: 1.0,
             timestamp: 0,
+            time_in_force: TimeInForce::GTC,
         })
     }
 
     fn cancel_order(command_id: &str) -> Command {
         Command::CancelOrder(CancelOrderCommand {
             command_id: command_id.into(),
-            order_id: 1,
-            user_id: "u1".into(),
-            symbol: "BTC-USD".into(),
+            order_id: "1".into(),
             timestamp: 0,
         })
     }

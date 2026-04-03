@@ -22,4 +22,3 @@ impl EventBus for KafkaBus {
         Ok(())
     }
 }
-

@@ -4,6 +4,18 @@ shard:
 
 grpc:
   port: 50051
+  # Optional; defaults match the previous hard-coded values.
+  # request_timeout_secs: 30
+  # concurrency_limit_per_connection: 256
+  # max_decoding_message_bytes: 4194304
+  # max_encoding_message_bytes: 4194304
+  # Uncomment and point to PEM files to enable TLS (HTTP/2 over TLS).
+  # tls:
+  #   cert_path: "./certs/server.pem"
+  #   key_path: "./certs/server.key"
+  #   # Optional mTLS: PEM of the CA that signed **client** certs (clients must present a valid cert).
+  #   client_ca_path: "./certs/ca.pem"
+  #   # client_auth_optional: false
 
 storage:
   data_dir: "./logs"
@@ -19,3 +31,9 @@ event_bus:
 
 engine:
   max_inflight_commands: 10000
+  # Optional; default 65536. Tokio command queue capacity (ingress → engine).
+  # command_channel_capacity: 65536
+
+# Optional Prometheus scrape endpoint (`match_core_grpc_requests_total`, etc.).
+# observability:
+#   metrics_listen_addr: "0.0.0.0:9090"

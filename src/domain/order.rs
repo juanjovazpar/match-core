@@ -1,5 +1,6 @@
-
-use crate::shared::{command::{OrderType, Side}, types::{OrderId, Price, Quantity, Symbol, Timestamp, UserId}};
+use crate::shared::{
+    types::{OrderId, Price, Quantity, Symbol, Timestamp, UserId, TimeInForce, Type, Side},
+};
 
 #[derive(Debug, Clone)]
 pub struct Order {
@@ -7,9 +8,10 @@ pub struct Order {
     pub user_id: UserId,
     pub symbol: Symbol,
     pub side: Side,
-    pub order_type: OrderType,
+    pub order_type: Type,
     pub price: Price,
     pub quantity: Quantity,
     pub remaining: Quantity,
     pub timestamp: Timestamp,
+    pub time_in_force: TimeInForce,
 }

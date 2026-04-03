@@ -1,5 +1,7 @@
+use crate::shared::types::{
+    CommandSeq, EventSeq, OrderId, Price, Quantity, Symbol, Timestamp, TradeId, TradeSeq, UserId,
+};
 use serde::{Deserialize, Serialize};
-use crate::shared::types::{CommandSeq, EventSeq, OrderId, Price, Quantity, Symbol, Timestamp, TradeId, TradeSeq, UserId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventEnvelope {

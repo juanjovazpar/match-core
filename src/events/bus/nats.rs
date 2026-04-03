@@ -25,4 +25,3 @@ impl EventBus for NatsBus {
         Ok(())
     }
 }
-

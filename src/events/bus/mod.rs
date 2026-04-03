@@ -17,4 +17,3 @@ pub fn create_event_bus(config: EventBusConfig) -> Box<dyn EventBus> {
         other => panic!("unsupported event bus type: {other} (expected 'nats' or 'kafka')"),
     }
 }
-

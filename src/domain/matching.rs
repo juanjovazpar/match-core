@@ -1,9 +1,8 @@
-
-use crate::shared::event::*;
 use crate::shared::command::Command;
+use crate::shared::event::*;
 
-use super::orderbook::OrderBook;
 use super::order::Order;
+use super::orderbook::OrderBook;
 
 pub struct MatchingEngine {
     pub book: OrderBook,
@@ -35,6 +34,7 @@ impl MatchingEngine {
             quantity: cmd.quantity,
             remaining: cmd.quantity,
             timestamp: cmd.timestamp,
+            time_in_force: cmd.time_in_force,
         };
 
         // Simplificado: no matching real aún

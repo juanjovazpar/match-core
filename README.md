@@ -1,6 +1,6 @@
 # MATCH CORE
 
-This project implements a **centralized matching engine**, the fundamental component at the core of any trading platform or electronic exchange. A matching engine is responsible for receiving buy and sell orders from multiple clients, storing them in an order book, and continuously matching compatible orders to generate trades. In practice, this is the same mechanism that powers real-world exchanges such as Binance or Coinbase: every time a trader places a limit or market order, the matching engine determines if there is a counterpart order available and executes the transaction. Queuing those that aren’t matched at the moment they are placed.
+This project implements a **centralized matching engine**—the core of a trading platform or electronic exchange: it receives orders, maintains an order book, and (when fully implemented) matches compatible bids and asks into trades. **This repository** already provides **durable command/event logging**, **gRPC ingress**, and a **message-bus outbound path**; **full matching and cancel** are still being built toward that goal.
 
 Our implementation is written in **Rust**, leveraging its safety guarantees and concurrency model to deliver **low latency, high throughput, and fault-tolerant order processing**. It is designed as a self-contained service that can run as a microservice in any system.
 
@@ -8,13 +8,14 @@ Our implementation is written in **Rust**, leveraging its safety guarantees and 
 
 ## Key Features
 
-- **Order Handling:** supports limit and market orders.
-- **Order Book:** efficient in-memory data structures for fast lookups and matching.
-- **Matching Logic:** automatically executes trades when bid/ask prices overlap.
-- **Persistence:** snapshots of the order book can be stored and restored from disk.
-- **Resilience:** recovery after restarts or crashes.
-- **Real-Time-Updates:** clients receive live notifications of book updates and trades via WebSocket.
-- **Concurrency:** built with Rust’s async runtime to handle multiple clients safely and efficiently.
+- **Command ingress (gRPC):** `OrderCmdService` over HTTP/2 (Tonic); optional TLS/mTLS, Prometheus metrics, bounded async hand-off to the engine. See [Transport module](#transport-module-grpc-ingress).
+- **Order Handling:** ingress accepts **limit and market** orders over gRPC; the engine stores them in the book and emits **accept** events—**full matching and cancel logic** are still evolving (see [Data structures](#data-structures-current-code)).
+- **Order book:** `BTreeMap` price levels with `VecDeque` FIFO per level (`domain/orderbook.rs`).
+- **Matching logic:** **roadmap**—the codebase is oriented toward full bid/ask crossing, but **trade execution and cancel handling are not finished** yet (see [Data structures](#data-structures-current-code)).
+- **Persistence:** write-ahead style **command and event log** (`LogWriter` / WAL) under `storage.data_dir`; snapshot-related config exists for future recovery workflows.
+- **Resilience:** foundation for replay/recovery from persisted commands and events (see core engine + WAL).
+- **Real-time events:** the engine emits **`EventEnvelope`** values on a channel; a dedicated **publisher** thread forwards them to a configurable **message bus** (e.g. **NATS** via `event_bus` in `config.yaml`). Downstream services or gateways can fan out to WebSockets, HTTP, etc.
+- **Concurrency:** **Tokio** for gRPC ingress and for the engine’s async command loop; **OS threads** separate gRPC, engine, and publisher; command path uses a **bounded** async channel for backpressure.
 
 ## Architecture Overview
 
@@ -23,187 +24,129 @@ If bidirectional or cross-pair trading is required (for example, `USD/EUR` and `
 
 ![Architecture Overview](./assets/images/architecture-overview.png)
 
-To maximize parallelism and minimize thread blocking and bottlenecks, the engine follows a layered threads design. Each layer handles a specific stage of order processing, with minimal synchronization and communication between threads. This approach ensures that threads can operate concurrently with minimal interruptions, improving throughput and overall system efficiency.
+The process uses **several OS threads** with a small, explicit pipeline: ingress, matching, and outbound events do not share a single blocking loop.
 
-- **Server Layer:** server for client connections. It does include a minimal API rest to manage orders and a socket channel to be updated with the order book changes.
-- **Matching Engine Core:** the heart of the system, where the order book exists and the trades are created through matching orders.
-- **Event System:** two **mspc** channels connect the execution threads and keep the paralellism efficient. The <span style="color:#f57751;">red channel</span> allows the connection to the engine while the <span style="color:#5951f5;">blue channel</span> helps the enginee to broadcast the changes.
-The mpsc channels will act as **FIFO** queues. This way, when the matching engine is busy and cannot process an incoming order, that order will wait in the queue until it is executed.
-- **Persistency Layer:** stores the orders and trades. It also in charge to create snapshots of the orderbook for recovery.
+- **Ingress (gRPC):** a **Tokio multi-thread** runtime accepts **HTTP/2** connections and the **`OrderCmdService`** RPCs. Validated commands are sent asynchronously on a **bounded `tokio::sync::mpsc`** channel toward the engine (capacity from `engine.command_channel_capacity`). When the queue is full, ingress **awaits** (`send().await`) and exerts **backpressure** on callers instead of growing memory without bound. Details: [Transport module](#transport-module-grpc-ingress).
+- **Matching engine core:** runs on its **own thread** with a **Tokio current-thread** runtime. It **`recv().await`s** commands in order, updates the in-memory book, writes the **WAL** (commands and derived events), and pushes **`EventEnvelope`** values to the event channel.
+- **Event publisher:** a **third thread** blocks on **`std::sync::mpsc::Receiver`**, serializing events and publishing to the configured **event bus** (e.g. NATS). This path is **synchronous** and unbounded today; the command path is the one sized for load.
+- **Persistence:** the engine persists **commands and events** through **`LogWriter`** (file under `storage.data_dir`). Snapshot settings in config anticipate fuller recovery tooling.
 
-### Data Structure
+The diagram in `./assets/images/architecture-overview.png` may predate the gRPC + NATS layout; treat this section as the **source of truth** for the current binary.
 
-The matching engine uses a **hybrid structure** that combines hashmaps and binary heaps to efficiently manage and match orders.
+### Data structures (current code)
 
-````
-pub type OrderQueue = LinkedHashmap<Order>;
-pub type OrderMap = HashMap<Price, OrderQueue>;
-pub type BidQueue = BTreeSet<Reverse<Price>>; // Ordered greatest to smallest
-pub type AskQueue = BTreeSet<Price>; // Ordered smallest to greatest
+The in-memory book is **`src/domain/orderbook.rs`**, driven by **`MatchingEngine`** in **`src/domain/matching.rs`**.
 
-
+```rust
 pub struct OrderBook {
-    bids: OrderMap,
-    asks: OrderMap,
-    bids_queue: BidQueue,
-    asks_queue: AskQueue,
+    pub bids: BTreeMap<OrderedFloat<f64>, VecDeque<Order>>,
+    pub asks: BTreeMap<OrderedFloat<f64>, VecDeque<Order>>,
 }
-````
+```
 
-- `OrderQueue`:
-Stores `Order` in a `LinkedHashmap<Order>`, a custom data structure defined to ensure **FIFO** access with efficient operations.
-- `OrderMap` (`HashMap<Price, OrderQueue>`)
-Each price level maps to a queue of orders (`OrderQueue`), stored as a stack (`LinkedHashmap<Order>`) sorted in a **FIFO** model (older orders have higher priority).
-    - `bids`:
-    contains buy orders grouped by price.
-    - `asks`:
-    contains sell orders grouped by price.
-- `BidQueue` and `AskQueue`:
-These `BTreeSet<Price>` maintain the set of active price levels, enabling quick access to the best bid (highest price) and best ask (lowest price).
-    - `BidQueue`:
-Prices for placed bids are uniquely stored in a descending order in a `BTreeSet<Price>` structure.
-    - `AskQueue`:
-Prices for placed asks are uniquely stored in an ascending order in a `BTreeSet<Reverse<Price>>` structure.
+- **`BTreeMap<OrderedFloat<f64>, …>`** — sorted **price levels** per side; `OrderedFloat` gives a total order on `f64`.
+- **`VecDeque<Order>`** — **FIFO** queue at each price (`push_back`).
 
+**Matching status:** `MatchingEngine::process` is still **simplified**: new orders are stored and an **`OrderAccepted`** event is emitted; **cancel** is a placeholder (no events). There is **no** full price–time priority matching loop in this repository yet—update this README when `domain/matching.rs` / `domain/orderbook.rs` evolve.
 
-This structure optimizes for fast price-level access and priority matching:
-Using `HashMaps` allows constant-time lookup of existing price levels and ensures insertion/removal while maintaining order priority. Keeping separate global `BTreeSet` for prices (`BidQueue`, `AskQueue`) avoids scanning all price levels to find the best price — crucial for real-time matching performance.
+| Operation | Notes | Typical complexity |
+| --------- | ----- | ------------------ |
+| `add_order` | Insert at price level; creates level if missing | O(log P) map step + O(1) deque push |
+| (future) match / cancel | To be documented when implemented | — |
 
-This design balances speed, simplicity, and memory efficiency, and scales well under high-frequency trading workloads.
+**P** = number of distinct price levels on the side being updated.
 
-### LinkedHashmap
+### Matching flow (diagram)
 
-This custom data structure has been implemented to optimize the matching process. It does works as a `LinkedList`. It does contains each value into a Node double-linked to its previous and next sibling. These `prev` and `next` links keep the orders sorted by placed time for each of the prices available.
-
-LinkedHashmap<T> is a hybrid data structure that combines the fast lookups of a HashMap with the ordered traversal of a doubly linked list.
-It maintains **FIFO** (insertion) order while providing O(1) access, insertion, and removal by key.
-
-- `head` → ID of the first (oldest) element
-- `tail` → ID of the last (newest) element
-- `items` → hashmap for O(1) access by ID
-
-This makes LinkedHashmap ideal for systems like order books, LRU caches, or task queues where both ordering and fast random access are required.
-
-It does follow this simplified structure and interface:
-
-````
-pub trait HasId {
-    type Id: Eq + Hash + Clone;
-    fn id(&self) -> Self::Id;
-}
-
-struct Node<T: HasId> {
-    pub value: T,
-    pub next: Option<T::Id>,
-    pub prev: Option<T::Id>,
-}
-
-pub struct LinkedHashmap<T: HasId> {
-    head: Option<T::Id>,
-    tail: Option<T::Id>,
-    items: HashMap<T::Id, Node<T>>,
-}
-impl<T> LinkedHashmap<T>
-where
-    T: HasId,
-    T::Id: Eq + Hash + Clone,
-{
-    pub fn new() -> Self {}
-
-    pub fn push(&mut self, value: T) {}
-
-    pub fn push_first(&mut self, value: T) {}
-
-    pub fn pop(&mut self) -> Option<T> {}
-
-    pub fn remove(&mut self, id: &T::Id) -> Option<T> {}
-
-    pub fn peek(&self) -> Option<&T> {}
-
-    pub fn peek_tail(&self) -> Option<&T> {}
-
-    pub fn get(&self, id: &T::Id) -> Option<&T> {}
-
-    pub fn get_mut(&mut self, id: &T::Id) -> Option<&mut T> {}
-
-    pub fn len(&self) -> usize {}
-
-    pub fn is_empty(&self) -> bool {}
-
-    pub fn contains(&self, id: &T::Id) -> bool {}
-
-    pub fn clear(&mut self) {}
-}
-````
-
-##### Operation costs table:
-
-| Method | Description | Complexity (Big O) |
-| ------ | ----------- | ------------------ |
-| `push` | Insert element at the end | O(1) |
-| `push_first` | Insert element at the front | O(1) |
-| `pop` | Remove element from the head | O(1) |
-| `remove` | Remove element by ID | O(1) |
-| `peek` / `peek_tail` | Access first / last element | O(1) |
-| `get` / `get_mut` | Access element by ID | O(1) |
-| `contains` | Check if ID exists | O(1) |
-| `len` / `is_empty` | Size or emptiness check | O(1) |
-| `clear` | Remove all elements | O(n) |
-
-### OrderBook
-
-Engine runs an orderbook in memory to allow matching as fast and safe and possible. To achieve this efficiency, it does implement our `LinkedHashmap`internally.
-
-- `bids` / `asks` → map price levels to queues of orders (OrderQueue = LinkedHashmap<Order>)
-- `bids_queue` / `asks_queue` → maintain sorted price levels for fast best-price access
-
-````
-pub struct OrderBook {
-    bids: HashMap<Price, OrderQueue>,
-    asks: HashMap<Price, OrderQueue>,
-    bids_queue: BTreeSet<Reverse<Price>>, // descending order
-    asks_queue: BTreeSet<Price>,          // ascending order
-}
-impl OrderBook {
-    pub fn execute(&mut self, mut order: Order) -> Vec<Trade> {}
-    
-    pub fn cancel(&mut self, order: Order) {}
-}
-````
-
-### Matching orders flow
-
-The following diagram shows the flow to match an entry order:
+The diagram below may describe a **target** end-to-end match path. The **current** Rust code only performs **accept + book insert** for new orders until matching and cancel are completed.
 
 ![Matching Overview](./assets/images/matching-overview.png)
 
 
-##### Operation costs table:
+## Transport module (gRPC ingress)
 
-| Method | Description | Complexity (Big O) |
-| ------ | ----------- | ------------------ |
-| `execute` | Match an incoming order against existing ones | O(n + k·log p) worst case, O(1) best case |
-| `cancel` | Remove an existing order by ID and price | O(1 + log p) |
+Order commands enter the process through **gRPC** (HTTP/2), implemented with **Tonic** + **Prost**. The `transport` crate module is responsible for everything from the wire up to handing a validated domain command to the matching engine thread.
 
-**Where:**
-- n = total number of orders in the book
-- k = number of price levels touched during execution
-- p = total number of price levels in the BTreeSet
+### Responsibilities
+
+| Piece | Role |
+| ----- | ---- |
+| **Proto / codegen** | `proto/orders.proto` is compiled in `build.rs`; generated types live under `transport::proto::pb` (`matchcore.v1`). |
+| **`transport::service::serve`** | Binds the Tonic server: TLS/plaintext, timeouts, concurrency per connection, request tracing spans, registers the order command service. |
+| **`transport::orders_service`** | Tonic implementation of `OrderCmdService` (Submit / Cancel): validation, metrics, dispatch. |
+| **`transport::orders_service::validator`** | Validates protobuf requests (enums, numeric fields, ids, shard symbol) before building `shared::command::Command`. |
+| **`transport::dispatcher`** | Async `submit`: sends `Command` into a **bounded** `tokio::sync::mpsc` channel toward the engine (`DispatchError` if the receiver is gone). |
+| **`transport::settings::GrpcServeOptions`** | Transport-owned snapshot of server tuning + TLS paths. **No dependency on `config`.** |
+| **`transport::metrics`** | Prometheus-friendly counters for ingress outcomes (see below). |
+
+### End-to-end flow
+
+1. Client calls `Submit` or `Cancel` on `matchcore.v1.OrderCmdService`.
+2. **`validator`** checks the request; on failure the RPC still returns **HTTP OK** with `OrderCmdReply` status **rejected** and a `CmdErr` code (application-level rejection, not gRPC `Status` for validation errors).
+3. On success, a **`Command`** is built and **`dispatcher.submit(cmd).await`** enqueues it for the engine.
+4. If the engine command channel is closed, the reply is rejected with an engine-unavailable error code and logged.
+
+### Architectural decisions
+
+- **gRPC instead of REST for commands** — binary, schema-first (`proto`), fits high-throughput internal ingress; clients need the `.proto` or compatible codegen.
+- **Transport decoupled from `config`** — `GrpcServeOptions` / `GrpcTlsOptions` are defined in `transport::settings`. The binary maps YAML/env via `config::grpc_bridge::grpc_serve_options(&config.grpc)` so the transport layer does not import `config::types`.
+- **Bounded async command queue** — `tokio::sync::mpsc` with capacity from `engine.command_channel_capacity` (default `65536`). This provides **backpressure**: a full queue blocks `send().await` on the gRPC worker until the engine drains. Event emission to NATS still uses **`std::sync::mpsc`** on a separate thread (sync publisher); only the **command** path is async Tokio.
+- **Two Tokio runtimes** — the matching engine loop runs on a **current-thread** runtime in its own OS thread; gRPC runs on a **multi-thread** runtime. This isolates scheduling: network I/O does not share the engine’s single task queue.
+- **Structured errors for dispatch** — `dispatcher::DispatchError` uses **`thiserror`**; ingress uses **`tracing`** with fields (`rpc`, `command_id`, `order_id`, etc.). These are complementary (types vs logs).
+- **TLS and mTLS are optional** — omit `grpc.tls` for **plaintext**. With `grpc.tls`, set `cert_path` + `key_path` for server TLS. Add `client_ca_path` to require (or optionally allow) **client certificates** (`client_auth_optional`, default `false` when verifying clients).
+- **Server hardening** — per-request timeout, per-connection concurrency limit, max encode/decode message sizes on the service, optional TLS/mTLS (rustls via Tonic’s `tls-ring` feature).
+- **Observability** — optional **`observability.metrics_listen_addr`** starts a Prometheus scrape HTTP listener (`metrics` + `metrics-exporter-prometheus`). Counter: `match_core_grpc_requests_total` with labels `rpc` (`submit` \| `cancel`) and `outcome` (`queued`, `rejected_validation`, `rejected_engine_unavailable`). If metrics are disabled, counter macros no-op until a global recorder is installed.
+
+### Layout (source)
+
+```
+src/transport/
+  mod.rs              # module tree
+  proto.rs            # include_proto!("matchcore.v1")
+  settings.rs         # GrpcServeOptions, validation
+  service.rs          # serve(...) — Tonic Server::builder
+  dispatcher.rs
+  metrics.rs
+  orders_service/
+    mod.rs            # pub use service::new
+    service.rs        # OrderCmdService + tonic server wrapper
+    validator.rs      # Validator
+```
+
+### Configuration reference (relevant keys)
+
+| Key | Purpose |
+| --- | ------- |
+| `grpc.port` | Listen port (bind `0.0.0.0`). |
+| `grpc.tls` | Optional. `cert_path`, `key_path`; optional `client_ca_path`, `client_auth_optional` for mTLS. |
+| `grpc.request_timeout_secs` | Tonic server per-request timeout (default `30`). |
+| `grpc.concurrency_limit_per_connection` | Max in-flight requests per HTTP/2 connection (default `256`). |
+| `grpc.max_decoding_message_bytes` / `max_encoding_message_bytes` | gRPC message size limits (default 4 MiB). |
+| `engine.command_channel_capacity` | Tokio command channel depth (default `65536`). |
+| `observability.metrics_listen_addr` | Optional `host:port` for Prometheus scrape (e.g. `0.0.0.0:9090`). |
+| `shard.pair_symbols` | Symbol the shard accepts; must match incoming submit requests. |
+| `storage.data_dir` | WAL / log directory for `LogWriter`. |
+| `event_bus.type` / `event_bus.url` | Outbound bus (e.g. `nats` + `nats://…`) consumed by the publisher thread. |
+
+Environment overrides use the existing `config` crate convention (e.g. `GRPC__TLS__CERT_PATH`, `EVENT_BUS__URL`, `OBSERVABILITY__METRICS_LISTEN_ADDR` with `__` nesting).
 
 
 ## Development 
 
 ### Dependencies
 
-- **axum:** Web framework for building HTTP servers and WebSocket endpoints; handles routing, extractors, and middleware.
-- **tokio:** Asynchronous runtime for handling multiple concurrent tasks efficiently, including WebSocket connections.
-- **serde:** Serialization/deserialization library; allows converting Rust structs to JSON and back.
-- **serde_json:** JSON support for serde, enabling sending/receiving JSON messages over WebSocket.
-- **dashmap:** Thread-safe concurrent hashmap, useful for managing connected clients without locking the entire structure.
-- **tracing:** Structured logging library to track events, useful for debugging and monitoring.
-- **tracing-subscriber:** Subscriber implementation for tracing to collect and format logs.
-- **anyhow:** Simple error handling library for Rust; allows returning and propagating errors easily.
-- **bincode:** Efficient binary serialization library, useful for saving/loading snapshots of the order book quickly.
+- **tokio:** Async runtime used for the **gRPC server** (multi-thread) and the **engine command loop** (current-thread worker inside a dedicated OS thread).
+- **tonic / tonic-prost / prost:** gRPC over HTTP/2; `proto/orders.proto` is compiled in `build.rs`.
+- **async-nats:** Client used by the event bus when `event_bus.type` is `nats` (see `src/events/`).
+- **ordered-float:** `OrderedFloat<f64>` keys for price levels in `OrderBook`.
+- **serde / serde_json:** (De)serialization for config and event payloads as needed.
+- **config + dotenvy:** Load `config.yaml` and optional environment overrides (`__` nested keys).
+- **tracing / tracing-subscriber:** Structured logs (e.g. ingress, dispatch failures).
+- **anyhow:** Ergonomic errors at application boundaries (e.g. server startup).
+- **thiserror:** Typed errors such as `transport::dispatcher::DispatchError`.
+- **bincode:** Binary serialization for event payloads published to the bus.
+- **metrics / metrics-exporter-prometheus:** Optional Prometheus HTTP scrape endpoint (`observability.metrics_listen_addr`).
+- **axum / dashmap / uuid / chrono / exchain-commons, etc.:** Declared in `Cargo.toml` for shared utilities or future work; **ingress in `src/` is gRPC (Tonic), not Axum.**
 
 ### Commands
 
@@ -222,7 +165,7 @@ First, ensure `ssh-agent` is running:
 ````
 eval "$(ssh-agent -s)"
 ssh-add ~/.ssh/{YOUR_SSH_KEY}
-´´´´
+````
 
 Then run the container:
 ````

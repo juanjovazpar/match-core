@@ -1,15 +1,11 @@
+use crate::core::{deduplicator::Deduplicator, log_writter::LogWriter, sequencer::Sequencer};
+use crate::domain::matching::MatchingEngine;
 use crate::shared::{
     channel::{CommandReceiver, EventSender},
     event::EventEnvelope,
     types::{CommandSeq, EventSeq},
 };
-use crate::core::{ 
-    sequencer::Sequencer,
-    log_writter::LogWriter,
-    deduplicator::Deduplicator
-};
 use crate::utils::time::now;
-use crate::domain::matching::MatchingEngine;
 
 /// Core matching engine loop.
 ///
@@ -27,13 +23,8 @@ pub struct Engine {
     pub matching: MatchingEngine,
 }
 impl Engine {
-    pub fn run(&mut self) {
-        loop {
-            let command = match self.command_rx.recv() {
-                Ok(cmd) => cmd,
-                Err(_) => break,
-            };
-
+    pub async fn run(&mut self) {
+        while let Some(command) = self.command_rx.recv().await {
             // Skip the command if it was already managed
             if self.dedup.exists(&command) {
                 continue;
@@ -60,7 +51,7 @@ impl Engine {
 
                 // Persist event in log
                 self.wal.write_event(&envelope);
-                
+
                 // Emit event for consumers
                 self.event_tx.send(envelope).ok();
             }
