@@ -22,8 +22,6 @@ Our implementation is written in **Rust**, leveraging its safety guarantees and 
 This matching engine is built with a strong focus on efficiency, parallelism, and safety. To achieve these goals, each engine instance is designed to handle a `single trading pair independently`. This isolation minimizes contingencies between markets and allows the system to scale horizontally.
 If bidirectional or cross-pair trading is required (for example, `USD/EUR` and `EUR/USD`), separated instances can be deployed — for instance, as two distinct Docker containers — each dedicated to one direction of the market.
 
-![Architecture Overview](./assets/images/architecture-overview.png)
-
 The process uses **several OS threads** with a small, explicit pipeline: ingress, matching, and outbound events do not share a single blocking loop.
 
 - **Ingress (gRPC):** a **Tokio multi-thread** runtime accepts **HTTP/2** connections and the **`OrderCmdService`** RPCs. Validated commands are sent asynchronously on a **bounded `tokio::sync::mpsc`** channel toward the engine (capacity from `engine.command_channel_capacity`). When the queue is full, ingress **awaits** (`send().await`) and exerts **backpressure** on callers instead of growing memory without bound. Details: [Transport module](#transport-module-grpc-ingress).
